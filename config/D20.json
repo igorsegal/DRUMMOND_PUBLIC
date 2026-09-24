@@ -1,0 +1,136 @@
+{
+  "schema": "D20_NATIVE_DRUMMOND_LIFECYCLE",
+  "version": 1,
+  "state": "FROZEN_RESEARCH_CONTRACT",
+  "principle": "No Factory02 entry, stop, target or trailing may participate in native Drummond economics.",
+  "timeframe_contract": {
+    "ltp": "H1",
+    "htp": "H4",
+    "intrabar": "M5",
+    "note": "Fixed hierarchy for this experiment; no opportunistic timeframe switching."
+  },
+  "setup_families": [
+    {
+      "id": "TR",
+      "name": "TREND_REFRESH",
+      "source_status": "SOURCE_RECOVERED",
+      "setup": [
+        "LTP is Trend Run",
+        "HTP direction supports the trend",
+        "PL Dot push is in trend direction"
+      ],
+      "trigger": "Price enters Live/Static PL Dot Refresh zone and subsequently resumes in trend direction.",
+      "initial_target": "Nearby HTP zone in direction of trade",
+      "extended_target": "Further Out HTP if Nearby weakens",
+      "initial_stop": "Beyond LTP Further Out opposite the trade"
+    },
+    {
+      "id": "CA",
+      "name": "CONGESTION_ACTION",
+      "source_status": "SOURCE_RECOVERED",
+      "setup": [
+        "LTP is Congestion Action",
+        "HTP is not in a directional trend against the fade",
+        "Boundary is classified strong from HTP context"
+      ],
+      "trigger": "Confirmed hold of strong block/support for LONG or strong dotted/resistance for SHORT.",
+      "initial_target": "Opposite envelope/congestion boundary",
+      "initial_stop": "Beyond LTP Further Out outside the defended boundary"
+    },
+    {
+      "id": "EX",
+      "name": "EXHAUST_REVERSAL",
+      "source_status": "SOURCE_RECOVERED",
+      "setup": [
+        "Trend penetrates Nearby and reaches Further Out",
+        "HTP is also mature/exhausting or losing PL Dot push"
+      ],
+      "trigger": "Conservative: Further Out holds and price begins returning toward PL Dot.",
+      "initial_target": "PL Dot Refresh zone, then opposite envelope boundary",
+      "initial_stop": "Beyond the exhausted Further Out"
+    },
+    {
+      "id": "CX",
+      "name": "CONGESTION_EXIT",
+      "source_status": "SOURCE_RECOVERED",
+      "setup": [
+        "LTP is in congestion",
+        "One boundary holds while the opposite boundary weakens/breaks",
+        "6/1 disappears in exit direction",
+        "HTP confirms exit direction"
+      ],
+      "trigger": "Confirmed boundary break / new Trend Run.",
+      "initial_target": "Nearby HTP in exit direction",
+      "extended_target": "Further Out HTP if Nearby weakens",
+      "initial_stop": "Beyond opposite LTP Further Out"
+    },
+    {
+      "id": "WB",
+      "name": "WEAK_BLOCK_BREAK",
+      "source_status": "SOURCE_RECOVERED",
+      "setup": [
+        "Block classified weak from HTP pressure",
+        "Nearby pressure holds against block"
+      ],
+      "trigger": "Conservative: confirmed block break and beginning of trend.",
+      "initial_target": "Nearby HTP in breakout direction",
+      "extended_target": "Further Out HTP if Nearby weakens",
+      "initial_stop": "Beyond opposite LTP Further Out"
+    }
+  ],
+  "management": {
+    "stop": {
+      "source_status": "SOURCE_RECOVERED",
+      "rule": "Stop beyond current-period Further Out; trail only in favorable direction as Further Out moves."
+    },
+    "flow_exit": {
+      "source_status": "SOURCE_QUALITATIVE",
+      "rule": "Exit before structural stop when flow against the position becomes good / flow in position direction deteriorates.",
+      "operationalizations_to_test_without_selection": [
+        "FLOW_1BAR",
+        "FLOW_2BAR",
+        "FLOW_3BAR"
+      ]
+    },
+    "target": {
+      "source_status": "SOURCE_RECOVERED",
+      "rule": "Primary target Nearby HTP; if Nearby weakens, extend to Further Out HTP."
+    },
+    "pyramiding": {
+      "source_status": "SOURCE_RECOVERED",
+      "rule": "Add on Live PL Dot Refresh while power/flow remains favorable.",
+      "fixed_research_caps": [
+        0,
+        1,
+        2
+      ]
+    },
+    "congestion_target": {
+      "source_status": "SOURCE_RECOVERED",
+      "rule": "Opposite envelope / congestion boundary."
+    }
+  },
+  "operationalization_policy": {
+    "no_oos_selection": true,
+    "no_parameter_optimization": true,
+    "qualitative_rules": "Enumerate small predeclared variants and report all variants.",
+    "source_gap_excluded_from_entry_exit": true
+  },
+  "source_gaps": [
+    "Closed 5/1 exact primary formula",
+    "Closed 5/9 exact primary formula",
+    "Jaws 5/9 exact primary formula",
+    "Exact numeric ET/EB formula beyond recovered proxy",
+    "Exact numeric Power Flow threshold",
+    "Exact author maximum pyramid layer count"
+  ],
+  "forbidden": [
+    "Factory02 signal IDs as entry triggers",
+    "Factory02 initial stop",
+    "Factory02 target",
+    "Factory02 structural trailing",
+    "OOS-driven threshold selection",
+    "Using SOURCE_GAP concepts as exact gates"
+  ],
+  "promotion_allowed": false
+}
