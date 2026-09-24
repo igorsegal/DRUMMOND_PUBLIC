@@ -1,0 +1,49 @@
+{
+  "block": "D26",
+  "status": "PASS",
+  "source_run": 36010857984,
+  "source_engine": "D25",
+  "symbols": 522,
+  "trade_records": 18656442,
+  "trading_logic_changed": false,
+  "selection_or_optimization": false,
+  "findings": {
+    "all_entry_states_negative_in_all_18_variants": true,
+    "all_entry_kinds_negative_in_all_18_variants": true,
+    "both_sides_negative_in_all_18_variants": true,
+    "best_variant": {
+      "name": "PROXY:F3:P0",
+      "mean_r": -0.18172824,
+      "long_mean_r": -0.135711,
+      "short_mean_r": -0.226153
+    },
+    "ca_later_live_refresh": {
+      "STRICT_F1_P1": {
+        "n": 13663,
+        "mean_r": 0.086241,
+        "positive_years": 19,
+        "years": 20
+      },
+      "STRICT_F2_P1": {
+        "n": 15650,
+        "mean_r": 0.125362,
+        "positive_years": 19,
+        "years": 20
+      },
+      "STRICT_F3_P1": {
+        "n": 15804,
+        "mean_r": 0.132153,
+        "positive_years": 19,
+        "years": 20
+      },
+      "STRICT_F3_P1_no_later_refresh": {
+        "n": 512201,
+        "mean_r": -0.225684,
+        "positive_years": 1,
+        "years": 20
+      }
+    }
+  },
+  "causality_warning": "PYRAMIDED=Y is known only after the later refresh occurs; it is diagnostic, not a legal historical entry filter.",
+  "next": "D27 causal delayed first entry at the actual Live PLDot Refresh event."
+}
