@@ -1,0 +1,14 @@
+InpRunMode=0
+InpEnableWatcher=true
+InpSymbolsCSV=
+InpExcludeSymbolsCSV=
+InpDecisionTF=60
+InpHTPTF=240
+InpDirectionMode=1
+InpRRMin=0.75
+InpRRMax=1.75
+InpProtectionBufferPoints=1
+InpTimerSeconds=10
+InpQueueFile=DRUMMOND_DEMO02_SIGNALS.csv
+InpAuditFile=DRUMMOND_DEMO02_WATCHER.csv
+InpClearTesterOutputOnInit=true
