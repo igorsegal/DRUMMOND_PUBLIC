@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "DRUMMOND_TRADER_DEMO_02_FIX2/**"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Python contracts
+        run: |
+          python -m py_compile             scripts/drummond_replay01.py             scripts/D17.py scripts/D21.py scripts/D23.py             scripts/D25.py scripts/D26.py scripts/D27.py scripts/D27A.py
+          python scripts/D23.py
+      - name: Secret-pattern guard
+        shell: bash
+        run: |
+          if git grep -n -E 'ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}|BEGIN [A-Z0-9 ]*PRIVATE KEY' -- . ':!docs/PUBLIC_AUDIT.md'; then
+            echo "Potential credential pattern found"
+            exit 2
+          fi
+          echo "Public CI PASS"
