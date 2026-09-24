@@ -1,0 +1,9 @@
+{
+  "schema": "DRUMMOND_DATA_BRIDGE_02_SCALE_PILOT",
+  "mode": "discover",
+  "max_ready_symbols": 50,
+  "include_incomplete_symbols": 5,
+  "always_include": ["XAUUSD"],
+  "target_shard_mb": 400,
+  "notes": "Scale-02 pilot auto-discovers canonical symbol directories, always includes XAUUSD, takes up to 50 READY symbols plus up to 5 incomplete symbols, and keeps each symbol atomic inside one shard."
+}
