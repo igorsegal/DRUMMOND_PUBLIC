@@ -8,7 +8,40 @@ permissions:
   actions: read
 
 jobs:
+  preflight:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify private dataset access
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) { throw "DRUMMOND_DATA_TOKEN secret is not configured" }
+
+          $repo = "igorsegal/DRUMMOND_CLOUD"
+          $tag = "dataset03-drummond_canonical_8e9a1d784e3893d9"
+          $assets = @(gh api "repos/$repo/releases/tags/$tag" --jq ".assets[].name")
+          if ($LASTEXITCODE -ne 0) { throw "Cannot access private dataset release. Check DRUMMOND_DATA_TOKEN repository access and Contents: Read-only permission." }
+
+          $required = @(
+            "DATASET_MANIFEST.json",
+            "DATASET_SYMBOLS.csv",
+            "shard_001.zip",
+            "shard_002.zip",
+            "shard_003.zip",
+            "shard_004.zip",
+            "shard_005.zip",
+            "shard_006.zip",
+            "shard_007.zip"
+          )
+          foreach ($name in $required) {
+            if ($assets -notcontains $name) { throw "Private dataset release is missing required asset: $name" }
+          }
+          Write-Host "D27 preflight PASS: private release is readable and all required assets are present."
+
   shard:
+    needs: preflight
     strategy:
       fail-fast: false
       matrix:
