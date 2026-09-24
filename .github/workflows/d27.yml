@@ -1,0 +1,97 @@
+name: D27
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  shard:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [shard_001.zip,shard_002.zip,shard_003.zip,shard_004.zip,shard_005.zip,shard_006.zip,shard_007.zip]
+    runs-on: windows-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Contract
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/D17.py scripts/D21.py scripts/D23.py scripts/D25.py scripts/D27.py scripts/D27A.py
+          if ($LASTEXITCODE -ne 0) { throw "D27 syntax failed" }
+          python scripts/D23.py
+          if ($LASTEXITCODE -ne 0) { throw "D23 contract failed" }
+
+      - name: Download private canonical shard
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) { throw "DRUMMOND_DATA_TOKEN secret is not configured" }
+          New-Item -ItemType Directory -Force -Path ".d27/pkg",".d27/data" | Out-Null
+          gh release download "dataset03-drummond_canonical_8e9a1d784e3893d9" --repo "igorsegal/DRUMMOND_CLOUD" --dir ".d27/pkg" --pattern "DATASET_MANIFEST.json" --pattern "DATASET_SYMBOLS.csv" --pattern "${{ matrix.shard }}"
+          if ($LASTEXITCODE -ne 0) { throw "Private dataset download failed" }
+          python scripts/data_bridge_verify02.py --package-dir ".d27/pkg" --out-root ".d27/data" --expected-dataset-id "DRUMMOND_CANONICAL_8E9A1D784E3893D9" --shard "${{ matrix.shard }}"
+          if ($LASTEXITCODE -ne 0) { throw "Dataset verification failed" }
+
+      - name: Run causal D27
+        shell: pwsh
+        run: |
+          python scripts/D27.py --data-root ".d27/data" --out "results/latest/d27/${{ matrix.shard }}"
+          if ($LASTEXITCODE -ne 0) { throw "D27 shard failed" }
+
+      - name: Gate
+        shell: pwsh
+        run: |
+          $s=Get-Content "results/latest/d27/${{ matrix.shard }}/D27.json" -Raw | ConvertFrom-Json
+          if ($s.status -ne "PASS") { throw "D27 shard not PASS" }
+          if ([int]$s.errors -ne 0) { throw "D27 errors" }
+          if ([bool]$s.contract.ca_setup_opens_trade) { throw "D27 CA entered early" }
+          if ([bool]$s.contract.future_refresh_filter_used) { throw "D27 future filter violation" }
+          if ([bool]$s.contract.lookahead) { throw "D27 lookahead violation" }
+          if ([bool]$s.contract.selection_or_optimization) { throw "D27 optimization violation" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d27-${{ matrix.shard }}
+          path: |
+            results/latest/d27/${{ matrix.shard }}/D27.csv
+            results/latest/d27/${{ matrix.shard }}/D27.json
+            results/latest/d27/${{ matrix.shard }}/D27_ERR.json
+          if-no-files-found: error
+
+  aggregate:
+    needs: shard
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: d27-*
+          path: .d27a
+      - name: Aggregate
+        shell: pwsh
+        run: |
+          python scripts/D27A.py --root ".d27a" --out "results/latest/d27_full"
+          if ($LASTEXITCODE -ne 0) { throw "D27 aggregate failed" }
+          $s=Get-Content "results/latest/d27_full/D27.json" -Raw | ConvertFrom-Json
+          if ($s.status -ne "PASS") { throw "D27 aggregate not PASS" }
+          if ([bool]$s.contract.lookahead) { throw "D27 lookahead violation" }
+          if ([bool]$s.contract.selection_or_optimization) { throw "D27 optimization violation" }
+          Get-Content "results/latest/d27_full/D27.txt" | Add-Content $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d27-full
+          path: results/latest/d27_full/
+          if-no-files-found: error
