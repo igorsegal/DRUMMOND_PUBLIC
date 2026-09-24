@@ -1,0 +1,16 @@
+{
+  "schema": "DRUMMOND_DATA_BRIDGE_01_PILOT",
+  "canonical_root": "D:\\AHexaTrader\\1DataFiles\\raw",
+  "target_shard_mb": 400,
+  "symbols": [
+    "XAUUSD",
+    "EURUSD",
+    "USDCHF",
+    "BTCUSDT",
+    "DOGEUSDT",
+    "AAPL",
+    "A",
+    "ADAUSDT"
+  ],
+  "notes": "Pilot spans metals, FX, crypto and equities. Missing required timeframes are reported, not fabricated."
+}
