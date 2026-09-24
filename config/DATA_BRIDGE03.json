@@ -1,0 +1,9 @@
+{
+  "schema": "DRUMMOND_DATA_BRIDGE_03_FULL",
+  "mode": "discover_all",
+  "target_shard_mb": 750,
+  "canonical_root": "D:\\AHexaTrader\\1DataFiles\\raw",
+  "required_tfs": ["H1", "H4", "M5"],
+  "missing_m5_policy": "SKIP_NO_M5",
+  "notes": "Scale 03 FULL selects every symbol directory in canonical RAW. It reuses the proven Data Bridge 02 package/verify contract and symbol-atomic sharding."
+}
