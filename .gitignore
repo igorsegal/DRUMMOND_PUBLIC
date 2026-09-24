@@ -1,0 +1,33 @@
+# Local credentials and environment
+.env
+.env.*
+secrets/
+credentials/
+
+# Compiled / temporary
+*.exe
+*.ex4
+*.dll
+*.obj
+*.o
+*.pdb
+*.pyc
+__pycache__/
+*.log
+*.err
+*.tmp
+*.bak
+build/
+bin/
+out/
+
+# Market data is intentionally excluded from the public repository
+*.bin
+*.hst
+*.hcc
+*.fxt
+*.zip
+bridge_out/
+.bridge/
+data/raw/
+data/private/
