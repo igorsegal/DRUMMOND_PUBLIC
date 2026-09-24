@@ -1,0 +1,55 @@
+{
+  "schema": "DRUMMOND_C01_FORWARD_14",
+  "state": "FROZEN_FORWARD_SHADOW",
+  "created_utc": "2026-09-24T06:28:00Z",
+  "source_dataset_id": "DRUMMOND_CANONICAL_8E9A1D784E3893D9",
+  "source_dataset_created_utc": "2026-09-23T20:15:19Z",
+  "source_dataset_max_m5_time": 1788243900,
+  "source_dataset_max_m5_utc": "2026-09-01T06:25:00Z",
+  "base_signal": "CONSERVATIVE_TREND_PLDOT_REFRESH_HTP_ALIGNED",
+  "base_parameters": {
+    "decision_tf": "H1",
+    "htp_tf": "H4",
+    "rr_min": 0.75,
+    "rr_max_exclusive": 1.75,
+    "protection_buffer_points": 1
+  },
+  "rule": {
+    "id": "C01",
+    "side": "LONG",
+    "feature": "ENTRY_PLDOT_R",
+    "definition": "(entry_reference - decision_pldot) / abs(entry_reference - stop_price)",
+    "condition": "ENTRY_PLDOT_R < 0",
+    "equivalent_live_condition": "entry_reference < decision_pldot"
+  },
+  "frozen_candidate_sha256": "a9a00478647d73e147ee0c7e7a063adc5b0fe96b97d403b81af49b3937a57b3e",
+  "evidence": {
+    "train": {
+      "n": 624,
+      "mean_r": 0.0891378,
+      "symbols": 151
+    },
+    "test": {
+      "n": 102,
+      "mean_r": 0.19276756,
+      "symbols": 65
+    },
+    "test_equal_weight_symbol_mean_r": 0.17158378,
+    "test_leave_one_symbol_out_min_mean_r": 0.15289882,
+    "test_cluster_bootstrap_95": [
+      0.00219824,
+      0.36521169
+    ],
+    "test_positive_years": 4,
+    "test_nonpositive_years": 0
+  },
+  "policy": {
+    "historical_rule_changes_forbidden": true,
+    "historical_test_reselection_forbidden": true,
+    "forward_capture_only": true,
+    "trading_enabled": false,
+    "historical_replay_on_attach": false,
+    "production_promotion": false,
+    "production_requirement": "Confirm on new forward/live events or a new immutable dataset created after the freeze."
+  }
+}
