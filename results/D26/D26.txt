@@ -1,0 +1,24 @@
+D26 XRAY
+STATUS: PASS (aggregated from 7 successful D26 shards, source run 36010857984)
+SYMBOLS: 522
+TRADE_RECORDS: 18656442
+TRADING LOGIC CHANGED: NO
+SELECTION/OPTIMIZATION: NO
+
+CORE:
+All 7 entry states are negative in all 18 variants.
+All 4 entry kinds are negative in all 18 variants.
+LONG and SHORT are negative in all 18 variants.
+Best variant PROXY:F3:P0 meanR=-0.18172824
+LONG meanR=-0.135711
+SHORT meanR=-0.226153
+
+XRAY CLUE:
+STRICT F1 P1, CA + later Live PLDot Refresh: N=13663 meanR=+0.086241, positive years=19/20.
+STRICT F2 P1, CA + later Live PLDot Refresh: N=15650 meanR=+0.125362, positive years=19/20.
+STRICT F3 P1, CA + later Live PLDot Refresh: N=15804 meanR=+0.132153, positive years=19/20.
+STRICT F3 P1, CA without later refresh: N=512201 meanR=-0.225684, positive years=1/20.
+
+CAUSALITY:
+PYRAMIDED=Y is ex-post diagnostic only and MUST NOT be used as an entry filter.
+Next experiment: wait causally for the refresh event and make it the first entry.
