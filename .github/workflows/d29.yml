@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/d29.yml"
+      - "scripts/D29.py"
+      - "scripts/D29A.py"
 
 permissions:
   contents: read
@@ -94,6 +96,7 @@ jobs:
           if ([int]$s.reconstruction_errors -ne 0) { throw "D29 reconstruction errors" }
           if ([bool]$s.contract.d27_trading_logic_changed) { throw "D29 changed D27 trading logic" }
           if (-not [bool]$s.contract.all_diagnostic_dimensions_known_at_entry) { throw "D29 non-causal dimension" }
+          if (-not [bool]$s.contract.undefined_h1_normalization_is_skipped_not_imputed) { throw "D29 H1 normalization contract" }
           if ([bool]$s.contract.selection_or_optimization) { throw "D29 optimization violation" }
           if ([bool]$s.contract.outcome_based_filtering) { throw "D29 outcome filter violation" }
           if (-not [bool]$s.contract.diagnostic_only) { throw "D29 must be diagnostic only" }
