@@ -1,0 +1,119 @@
+name: CURRENCY STRENGTH LAB CS01-CS03
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_tag:
+        description: Canonical dataset release tag
+        required: true
+        default: dataset03-drummond_canonical_8e9a1d784e3893d9
+  push:
+    paths:
+      - '.github/workflows/currency_strength_lab.yml'
+      - 'scripts/CS01.py'
+      - 'scripts/CS02.py'
+      - 'scripts/CS03.py'
+
+permissions:
+  contents: read
+
+jobs:
+  cs-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Syntax contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/CS01.py scripts/CS02.py scripts/CS03.py scripts/drummond_replay01.py
+
+      - name: Download canonical manifest and FX shards
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag || 'dataset03-drummond_canonical_8e9a1d784e3893d9' }}
+        run: |
+          set -euo pipefail
+          mkdir -p .dataset
+          gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern DATASET_MANIFEST.csv
+          for n in 001 002 003 004 005 006; do
+            gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern "shard_${n}.zip"
+          done
+
+      - name: Extract and verify 28 H4 FX pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,hashlib,pathlib,zipfile
+          pairs=set('AUDCAD AUDCHF AUDJPY AUDNZD AUDUSD CADCHF CADJPY CHFJPY EURAUD EURCAD EURCHF EURGBP EURJPY EURNZD EURUSD GBPAUD GBPCAD GBPCHF GBPJPY GBPNZD GBPUSD NZDCAD NZDCHF NZDJPY NZDUSD USDCAD USDCHF USDJPY'.split())
+          with open('.dataset/DATASET_MANIFEST.csv',newline='',encoding='utf-8-sig') as f:
+              rows=[r for r in csv.DictReader(f) if r['symbol'] in pairs and r['tf']=='H4']
+          assert len(rows)==28, len(rows)
+          out=pathlib.Path('.fx');out.mkdir(exist_ok=True)
+          by={}
+          for r in rows: by.setdefault(r['shard'],[]).append(r)
+          for shard,rr in sorted(by.items()):
+              zp=pathlib.Path('.dataset')/shard
+              with zipfile.ZipFile(zp) as z:
+                  names=set(z.namelist())
+                  for r in rr:
+                      rel=r['relative_path'].replace('\\','/')
+                      if rel not in names: raise SystemExit('missing in shard '+rel)
+                      z.extract(rel,out)
+                      p=out/rel
+                      h=hashlib.sha256(p.read_bytes()).hexdigest()
+                      if h.lower()!=r['sha256'].lower(): raise SystemExit('SHA mismatch '+rel)
+                      print('PASS',rel,r['bar_count'])
+          PY
+
+      - name: CS01 strength engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/CS01.py --root .fx --out results/latest/cs01
+          cat results/latest/cs01/CS01.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: CS02 eight features
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/CS02.py --states results/latest/cs01/CS01_STATES.csv --out results/latest/cs02
+          cat results/latest/cs02/CS02.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: CS03 incremental audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/CS03.py --features results/latest/cs02/CS02_FEATURES.csv --eurusd .fx/EURUSD/EURUSD_H4.bin --out results/latest/cs03
+          cat results/latest/cs03/CS03.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib
+          for block in ('cs01','cs02','cs03'):
+              p=pathlib.Path('results/latest')/block/(block.upper()+'.json')
+              s=json.loads(p.read_text())
+              assert s['status']=='PASS', (block,s)
+              assert s['contract']['trading_or_pnl'] is False
+              assert s['contract']['parameter_optimization'] is False
+          print('CS LAB gate PASS')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: currency-strength-cs01-cs03
+          path: |
+            results/latest/cs01/
+            results/latest/cs02/
+            results/latest/cs03/
+          if-no-files-found: error
