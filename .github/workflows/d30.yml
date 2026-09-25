@@ -1,0 +1,143 @@
+name: D30
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/d30.yml"
+      - "scripts/D30.py"
+      - "scripts/D30A.py"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  preflight:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify private dataset access
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) { throw "DRUMMOND_DATA_TOKEN secret is not configured" }
+          $repo = "igorsegal/DRUMMOND_CLOUD"
+          $tag = "dataset03-drummond_canonical_8e9a1d784e3893d9"
+          $assets = @(gh api "repos/$repo/releases/tags/$tag" --jq ".assets[].name")
+          if ($LASTEXITCODE -ne 0) { throw "Cannot access private dataset release." }
+          $required = @(
+            "DATASET_MANIFEST.json","DATASET_SYMBOLS.csv",
+            "shard_001.zip","shard_002.zip","shard_003.zip","shard_004.zip",
+            "shard_005.zip","shard_006.zip","shard_007.zip"
+          )
+          foreach ($name in $required) {
+            if ($assets -notcontains $name) { throw "Private dataset release is missing required asset: $name" }
+          }
+          Write-Host "D30 preflight PASS"
+
+  shard:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [shard_001.zip,shard_002.zip,shard_003.zip,shard_004.zip,shard_005.zip,shard_006.zip,shard_007.zip]
+    runs-on: windows-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Contract
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/D17.py scripts/D25.py scripts/D30.py scripts/D30A.py
+          if ($LASTEXITCODE -ne 0) { throw "D30 syntax failed" }
+
+      - name: Download private canonical shard
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) { throw "DRUMMOND_DATA_TOKEN secret is not configured" }
+          New-Item -ItemType Directory -Force -Path ".d30/pkg",".d30/data" | Out-Null
+          gh release download "dataset03-drummond_canonical_8e9a1d784e3893d9" --repo "igorsegal/DRUMMOND_CLOUD" --dir ".d30/pkg" --pattern "DATASET_MANIFEST.json" --pattern "DATASET_SYMBOLS.csv" --pattern "${{ matrix.shard }}"
+          if ($LASTEXITCODE -ne 0) { throw "Private dataset download failed" }
+          python scripts/data_bridge_verify02.py --package-dir ".d30/pkg" --out-root ".d30/data" --expected-dataset-id "DRUMMOND_CANONICAL_8E9A1D784E3893D9" --shard "${{ matrix.shard }}"
+          if ($LASTEXITCODE -ne 0) { throw "Dataset verification failed" }
+
+      - name: Run D30 predictive audit
+        shell: pwsh
+        run: |
+          python scripts/D30.py --data-root ".d30/data" --out "results/latest/d30/${{ matrix.shard }}"
+          if ($LASTEXITCODE -ne 0) { throw "D30 shard failed" }
+
+      - name: Gate
+        shell: pwsh
+        run: |
+          $s=Get-Content "results/latest/d30/${{ matrix.shard }}/D30.json" -Raw | ConvertFrom-Json
+          if ($s.status -ne "PASS") { throw "D30 shard not PASS" }
+          if ([int]$s.errors -ne 0) { throw "D30 errors" }
+          if ([bool]$s.contract.trading_entries_used) { throw "D30 trading contamination" }
+          if ([bool]$s.contract.stops_targets_used) { throw "D30 stop/target contamination" }
+          if ([bool]$s.contract.pnl_used) { throw "D30 PnL contamination" }
+          if (-not [bool]$s.contract.all_features_known_at_event_time) { throw "D30 non-causal feature" }
+          if (-not [bool]$s.contract.forward_outcomes_only_after_event) { throw "D30 forward outcome violation" }
+          if ([bool]$s.contract.future_filter_used) { throw "D30 future filter violation" }
+          if ([bool]$s.contract.selection_or_optimization) { throw "D30 optimization violation" }
+          if ([bool]$s.contract.lookahead) { throw "D30 lookahead violation" }
+          if ([bool]$s.contract.promotion_allowed) { throw "D30 promotion forbidden" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d30-${{ matrix.shard }}
+          path: |
+            results/latest/d30/${{ matrix.shard }}/D30.csv
+            results/latest/d30/${{ matrix.shard }}/D30R.csv
+            results/latest/d30/${{ matrix.shard }}/D30Y.csv
+            results/latest/d30/${{ matrix.shard }}/D30.json
+            results/latest/d30/${{ matrix.shard }}/D30_ERR.json
+          if-no-files-found: error
+
+  aggregate:
+    needs: shard
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: d30-*
+          path: .d30a
+
+      - name: Aggregate
+        shell: pwsh
+        run: |
+          python scripts/D30A.py --root ".d30a" --out "results/latest/d30_full"
+          if ($LASTEXITCODE -ne 0) { throw "D30 aggregate failed" }
+          $s=Get-Content "results/latest/d30_full/D30.json" -Raw | ConvertFrom-Json
+          if ($s.status -ne "PASS") { throw "D30 aggregate not PASS" }
+          if ([bool]$s.contract.trading_entries_used) { throw "D30 trading contamination" }
+          if ([bool]$s.contract.stops_targets_used) { throw "D30 stop/target contamination" }
+          if ([bool]$s.contract.pnl_used) { throw "D30 PnL contamination" }
+          if (-not [bool]$s.contract.all_features_known_at_event_time) { throw "D30 non-causal feature" }
+          if (-not [bool]$s.contract.forward_outcomes_only_after_event) { throw "D30 forward outcome violation" }
+          if ([bool]$s.contract.future_filter_used) { throw "D30 future filter violation" }
+          if ([bool]$s.contract.selection_or_optimization) { throw "D30 optimization violation" }
+          if ([bool]$s.contract.lookahead) { throw "D30 lookahead violation" }
+          if ([bool]$s.contract.promotion_allowed) { throw "D30 promotion forbidden" }
+          Get-Content "results/latest/d30_full/D30.txt" | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d30-full
+          path: results/latest/d30_full/
+          if-no-files-found: error
