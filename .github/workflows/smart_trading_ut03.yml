@@ -1,0 +1,103 @@
+name: SMART TRADING UT03
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_tag:
+        description: Canonical dataset release tag
+        required: true
+        default: dataset03-drummond_canonical_8e9a1d784e3893d9
+  push:
+    paths:
+      - '.github/workflows/smart_trading_ut03.yml'
+      - 'scripts/UT03.py'
+
+permissions:
+  contents: read
+
+jobs:
+  ut03:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Syntax contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/UT03.py scripts/drummond_replay01.py
+
+      - name: Download canonical manifests and required shards
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag || 'dataset03-drummond_canonical_8e9a1d784e3893d9' }}
+        run: |
+          set -euo pipefail
+          mkdir -p .dataset
+          for a in DATASET_MANIFEST.csv shard_001.zip shard_003.zip shard_004.zip shard_005.zip shard_006.zip; do
+            echo "Downloading $a"
+            gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern "$a"
+          done
+
+      - name: Extract seven H4 pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .fx
+          unzip -q -o .dataset/shard_001.zip 'AUDUSD/AUDUSD_H4.bin' -d .fx
+          unzip -q -o .dataset/shard_003.zip 'EURUSD/EURUSD_H4.bin' -d .fx
+          unzip -q -o .dataset/shard_004.zip 'GBPUSD/GBPUSD_H4.bin' -d .fx
+          unzip -q -o .dataset/shard_005.zip 'NZDUSD/NZDUSD_H4.bin' -d .fx
+          unzip -q -o .dataset/shard_006.zip 'USDCAD/USDCAD_H4.bin' 'USDCHF/USDCHF_H4.bin' 'USDJPY/USDJPY_H4.bin' -d .fx
+          find .fx -type f -maxdepth 2 -printf '%p %s bytes\n'
+
+      - name: Verify extracted H4 SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,hashlib,pathlib
+          wanted={'AUDUSD','EURUSD','GBPUSD','NZDUSD','USDCAD','USDCHF','USDJPY'}
+          with open('.dataset/DATASET_MANIFEST.csv',newline='',encoding='utf-8-sig') as f:
+              rows=list(csv.DictReader(f))
+          m={(r['symbol'],r['tf']):r for r in rows if r['symbol'] in wanted and r['tf']=='H4'}
+          assert len(m)==7, len(m)
+          for sym in sorted(wanted):
+              p=pathlib.Path('.fx')/sym/(sym+'_H4.bin')
+              h=hashlib.sha256(p.read_bytes()).hexdigest()
+              exp=m[(sym,'H4')]['sha256'].lower()
+              print(sym,h,exp,'PASS' if h==exp else 'FAIL')
+              if h!=exp: raise SystemExit('SHA mismatch '+sym)
+          PY
+
+      - name: Run UT03
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/UT03.py --root .fx --out results/latest/ut03
+          cat results/latest/ut03/UT03.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib
+          s=json.loads(pathlib.Path('results/latest/ut03/UT03.json').read_text())
+          assert s['status']=='PASS'
+          assert s['contract']['trading_or_pnl'] is False
+          assert s['contract']['parameter_optimization'] is False
+          assert s['contract']['target_excluded_from_basket'] is True
+          print('UT03 gate PASS')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smart-trading-ut03
+          path: results/latest/ut03/
+          if-no-files-found: error
