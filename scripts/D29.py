@@ -105,6 +105,17 @@ def main():
                 trade_records+=len(rr)
 
                 for t in rr:
+                    r=float(t["R"])
+                    year=str(datetime.fromtimestamp(int(t["ENTRY_TIME"]),tz=timezone.utc).year)
+
+                    # Every D27 trade must remain represented in the D29 baseline.
+                    base_keys=[("ALL","ALL"),("SIDE",t["SIDE"])]
+                    for dim,key in base_keys:
+                        base=(variant,dim,key)
+                        add(dims[base],r);add(local[base],r);add(years[base+(year,)],r)
+                    base=(variant,"SYMBOL",sym)
+                    add(dims[base],r);add(local[base],r);add(years[base+(year,)],r)
+
                     confirm=int(t["CONFIRM_TIME"])
                     z=by_time.get(confirm)
                     if z is None:
@@ -127,34 +138,33 @@ def main():
                         reconstruction_errors+=1
                         continue
 
+                    ext_present="YES" if ext is not None else "NO"
+                    geo_keys=[
+                      ("TARGET_R",target_r_bucket(tr)),
+                      ("EXTENSION",ext_present),
+                    ]
+
+                    # H1-normalized diagnostics are undefined on a zero/flat
+                    # previous H1 bar. That is missing diagnostic geometry,
+                    # not a D27 reconstruction failure.
                     prev=h1[idx-1] if idx>=1 else None
                     hr=(prev[2]-prev[3]) if prev is not None else 0.0
                     if not math.isfinite(hr) or hr<=point*0.5:
-                        reconstruction_errors+=1
-                        continue
+                        diagnostic_skips["H1_RANGE_UNAVAILABLE"]+=1
+                    else:
+                        sh=risk/hr
+                        th=abs(tp-entry)/hr
+                        gap=d*(entry-prev[4])/hr
+                        geo_keys.extend([
+                          ("STOP_H1",stop_h1_bucket(sh)),
+                          ("TARGET_H1",target_h1_bucket(th)),
+                          ("ENTRY_GAP_H1",gap_h1_bucket(gap)),
+                          ("TARGET_R_X_STOP_H1",target_r_bucket(tr)+"|"+stop_h1_bucket(sh)),
+                        ])
 
-                    sh=risk/hr
-                    th=abs(tp-entry)/hr
-                    gap=d*(entry-prev[4])/hr
-                    ext_present="YES" if ext is not None else "NO"
-                    keys=[
-                      ("ALL","ALL"),
-                      ("SIDE",t["SIDE"]),
-                      ("TARGET_R",target_r_bucket(tr)),
-                      ("STOP_H1",stop_h1_bucket(sh)),
-                      ("TARGET_H1",target_h1_bucket(th)),
-                      ("ENTRY_GAP_H1",gap_h1_bucket(gap)),
-                      ("EXTENSION",ext_present),
-                      ("TARGET_R_X_STOP_H1",target_r_bucket(tr)+"|"+stop_h1_bucket(sh)),
-                    ]
-
-                    r=float(t["R"])
-                    year=str(datetime.fromtimestamp(int(t["ENTRY_TIME"]),tz=timezone.utc).year)
-                    for dim,key in keys:
+                    for dim,key in geo_keys:
                         base=(variant,dim,key)
                         add(dims[base],r);add(local[base],r);add(years[base+(year,)],r)
-                    base=(variant,"SYMBOL",sym)
-                    add(dims[base],r);add(local[base],r);add(years[base+(year,)],r)
 
             for base,x in local.items():
                 z=robust[base];z["symbols"]+=1
@@ -187,7 +197,8 @@ def main():
       "block":"D29","status":"PASS" if syms>0 and not errs and reconstruction_errors==0 else "FAIL",
       "source":"D27","purpose":"causal entry-geometry attribution",
       "symbols":syms,"trade_records":trade_records,
-      "errors":len(errs),"reconstruction_errors":reconstruction_errors,"skips":dict(skips),
+      "errors":len(errs),"reconstruction_errors":reconstruction_errors,
+      "diagnostic_skips":dict(diagnostic_skips),"skips":dict(skips),
       "dimensions":[
         "ALL","SIDE","TARGET_R","STOP_H1","TARGET_H1",
         "ENTRY_GAP_H1","EXTENSION","TARGET_R_X_STOP_H1","SYMBOL"
@@ -196,6 +207,7 @@ def main():
         "source_engine":"D27",
         "d27_trading_logic_changed":False,
         "all_diagnostic_dimensions_known_at_entry":True,
+        "undefined_h1_normalization_is_skipped_not_imputed":True,
         "selection_or_optimization":False,
         "outcome_based_filtering":False,
         "diagnostic_only":True,
