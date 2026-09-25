@@ -26,7 +26,7 @@ jobs:
           set -euo pipefail
           repo="igorsegal/DRUMMOND_CLOUD"
           assets="$(gh api "repos/$repo/releases/tags/$TAG" --jq '.assets[].name')"
-          for f in EURUSD_M1.bin XAUUSD_M1.bin USDJPY_M1.bin TAKBIR_M1_MANIFEST.csv TAKBIR_M1_SHA256.csv; do
+          for f in EURUSD_M1.bin XAUUSD_M1.bin USDJPY_M1.bin TAKBIR_M1_3SYM_MANIFEST.csv TAKBIR_M1_SHA256.csv; do
             echo "$assets" | grep -Fx "$f" >/dev/null || { echo "Missing asset: $f"; exit 2; }
           done
           echo "TAKBIR M1 preflight PASS"
