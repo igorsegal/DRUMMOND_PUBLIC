@@ -38,10 +38,15 @@ def main():
     ap.add_argument("--out",type=Path,required=True)
     a=ap.parse_args();a.out.mkdir(parents=True,exist_ok=True)
 
-    cells=defaultdict(newa);waits=Counter();errs=[];syms=0;signal_counts=Counter()
+    cells=defaultdict(newa);waits=Counter();skips=Counter();errs=[];syms=0;signal_counts=Counter()
     for p in sorted(a.data_root.rglob("*_H1.bin")):
         sym=p.name[:-7]
         try:
+            h4s=list(a.data_root.rglob(f"{sym}_H4.bin"))
+            m5s=list(a.data_root.rglob(f"{sym}_M5.bin"))
+            if not h4s: skips["SKIP_NO_H4"]+=1; continue
+            if not m5s: skips["SKIP_NO_M5"]+=1; continue
+            if len(h4s)!=1 or len(m5s)!=1: raise RuntimeError("duplicate required TF")
             hdr,bars=read_xfbar(p)
             if hdr["period_seconds"]!=3600:continue
             point=float(hdr["point"]);r=reconstruct(bars)
@@ -110,18 +115,19 @@ def main():
     out={
       "block":"T02","status":"PASS" if syms and rows and not errs else "FAIL",
       "symbols":syms,"signal_counts":dict(signal_counts),"iqamat_wait_buckets":dict(waits),
-      "errors":len(errs),"horizons_h1_bars":list(HORIZONS),
+      "skips":dict(skips),"errors":len(errs),"horizons_h1_bars":list(HORIZONS),
       "contract":{
         "source":"T01 frozen causal reconstruction",
         "reference":"signal bar close",
         "future_starts_after_signal_close":True,
         "normalization":"prior 24 completed H1 mean high-low range",
         "matched_baseline":"same-symbol unconditional forward return, same direction",
+        "canonical_universe_requires_h1_h4_m5":True,
         "trading_pnl":False,"future_filter":False,"selection_or_optimization":False,"lookahead":False
       }
     }
     (a.out/"T02.json").write_text(json.dumps(out,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     (a.out/"T02_ERR.json").write_text(json.dumps(errs,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
-    print(f"T02 {out['status']} symbols={syms} rows={len(rows)} signals={sum(signal_counts.values())} errors={len(errs)} waits={dict(waits)}")
+    print(f"T02 {out['status']} symbols={syms} rows={len(rows)} signals={sum(signal_counts.values())} skips={dict(skips)} errors={len(errs)} waits={dict(waits)}")
     if out["status"]!="PASS":raise SystemExit(2)
 if __name__=="__main__":main()
