@@ -13,6 +13,7 @@ on:
       - 'scripts/CS01.py'
       - 'scripts/CS02.py'
       - 'scripts/CS03.py'
+      - 'scripts/CS04.py'
 
 permissions:
   contents: read
@@ -94,13 +95,20 @@ jobs:
           python scripts/CS03.py --features results/latest/cs02/CS02_FEATURES.csv --eurusd .fx/EURUSD/EURUSD_H4.bin --out results/latest/cs03
           cat results/latest/cs03/CS03.txt >> "$GITHUB_STEP_SUMMARY"
 
+      - name: CS04 matched controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/CS04.py --states results/latest/cs01/CS01_STATES.csv --features results/latest/cs02/CS02_FEATURES.csv --eurusd .fx/EURUSD/EURUSD_H4.bin --out results/latest/cs04
+          cat results/latest/cs04/CS04.txt >> "$GITHUB_STEP_SUMMARY"
+
       - name: Gate
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import json,pathlib
-          for block in ('cs01','cs02','cs03'):
+          for block in ('cs01','cs02','cs03','cs04'):
               p=pathlib.Path('results/latest')/block/(block.upper()+'.json')
               s=json.loads(p.read_text())
               assert s['status']=='PASS', (block,s)
@@ -116,4 +124,5 @@ jobs:
             results/latest/cs01/
             results/latest/cs02/
             results/latest/cs03/
+            results/latest/cs04/
           if-no-files-found: error
