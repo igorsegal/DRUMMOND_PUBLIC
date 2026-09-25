@@ -12,6 +12,7 @@ on:
       - '.github/workflows/takbir_m1_3sym.yml'
       - 'scripts/TM01.py'
       - 'scripts/TM01A.py'
+      - 'scripts/TM02.py'
 
 permissions:
   contents: read
@@ -144,15 +145,25 @@ jobs:
           pattern: tm01-*
           path: .tm01_all
 
-      - name: Aggregate
+      - name: Aggregate TM01
         shell: bash
         run: |
           set -euo pipefail
           python scripts/TM01A.py --root ".tm01_all" --out "results/latest/tm01_full"
           cat "results/latest/tm01_full/TM01.txt" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: TM02 hard cost and tail stress
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/TM02.py --root ".tm01_all" --out "results/latest/tm02"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          cat "results/latest/tm02/TM02.txt" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
           name: takbir-m1-3sym-full
-          path: results/latest/tm01_full/
+          path: |
+            results/latest/tm01_full/
+            results/latest/tm02/
           if-no-files-found: error
