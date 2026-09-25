@@ -13,6 +13,7 @@ on:
       - 'scripts/TM01.py'
       - 'scripts/TM01A.py'
       - 'scripts/TM02.py'
+      - 'scripts/TM03.py'
 
 permissions:
   contents: read
@@ -160,10 +161,19 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           cat "results/latest/tm02/TM02.txt" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: TM03 XAUUSD electronic microscope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/TM03.py --root ".tm01_all" --out "results/latest/tm03"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          cat "results/latest/tm03/TM03.txt" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
           name: takbir-m1-3sym-full
           path: |
             results/latest/tm01_full/
             results/latest/tm02/
+            results/latest/tm03/
           if-no-files-found: error
