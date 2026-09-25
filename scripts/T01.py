@@ -146,10 +146,15 @@ def main():
     a=ap.parse_args()
     a.out.mkdir(parents=True,exist_ok=True)
 
-    sums=Counter(); errs=[]; symbol_rows=[]; syms=0
+    sums=Counter(); skips=Counter(); errs=[]; symbol_rows=[]; syms=0
     for p in sorted(a.data_root.rglob("*_H1.bin")):
         sym=p.name[:-7]
         try:
+            h4s=list(a.data_root.rglob(f"{sym}_H4.bin"))
+            m5s=list(a.data_root.rglob(f"{sym}_M5.bin"))
+            if not h4s: skips["SKIP_NO_H4"]+=1; continue
+            if not m5s: skips["SKIP_NO_M5"]+=1; continue
+            if len(h4s)!=1 or len(m5s)!=1: raise RuntimeError("duplicate required TF")
             hdr,bars=read_xfbar(p)
             if hdr["period_seconds"]!=3600:continue
             r=reconstruct(bars); syms+=1
@@ -183,13 +188,14 @@ def main():
       "symbols":syms,"totals":dict(sums),
       "azan_total":az,"iqamat_total":iq,
       "iqamat_per_azan":(iq/az if az else None),
-      "errors":len(errs),
+      "errors":len(errs),"skips":dict(skips),
       "contract":{
         "takbir_11_bar":True,"five_bars_right_required":True,
         "strict_unique_extreme":True,"levels_alternate":True,
         "potential_level_confirmed_by_opposite_takbir":True,
         "azan_close_break":True,"iqamat_close_break":True,
         "same_bar_azan_iqamat_allowed":True,
+        "canonical_universe_requires_h1_h4_m5":True,
         "trading_pnl":False,"lookahead":False,"selection_or_optimization":False
       },
       "reconstruction_notes":[
@@ -200,7 +206,7 @@ def main():
     }
     (a.out/"T01.json").write_text(json.dumps(summary,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     (a.out/"T01_ERR.json").write_text(json.dumps(errs,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
-    print(f"T01 {summary['status']} symbols={syms} takbir={sums['TAKBIR']} levels={sums['LEVELS']} azan={az} iqamat={iq} iq/az={(iq/az if az else 0):.6f} errors={len(errs)}")
+    print(f"T01 {summary['status']} symbols={syms} takbir={sums['TAKBIR']} levels={sums['LEVELS']} azan={az} iqamat={iq} iq/az={(iq/az if az else 0):.6f} skips={dict(skips)} errors={len(errs)}")
     if summary["status"]!="PASS":raise SystemExit(2)
 
 if __name__=="__main__":
