@@ -12,6 +12,7 @@ on:
       - '.github/workflows/news01.yml'
       - 'scripts/NEWS01.py'
       - 'scripts/NEWS02.py'
+      - 'scripts/NEWS03.py'
 
 permissions:
   contents: read
@@ -30,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile scripts/NEWS01.py scripts/NEWS02.py scripts/drummond_replay01.py
+          python -m py_compile scripts/NEWS01.py scripts/NEWS02.py scripts/NEWS03.py scripts/drummond_replay01.py
 
       - name: Download pinned Forex Factory historical calendar
         shell: bash
@@ -128,10 +129,35 @@ jobs:
           print('NEWS02 gate PASS')
           PY
 
+      - name: Run NEWS03
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/NEWS03.py --root .fx --calendar .news/forex_factory_cache.csv --out results/latest/news03
+          cat results/latest/news03/NEWS03.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: NEWS03 gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib
+          s=json.loads(pathlib.Path('results/latest/news03/NEWS03.json').read_text())
+          assert s['status']=='PASS'
+          c=s['contract']
+          assert c['actual_forecast_previous_used'] is False
+          assert c['external_target_pair_excluded'] is True
+          assert c['parameter_optimization'] is False
+          assert c['fresh_out_of_sample_validation'] is False
+          assert c['portfolio_pnl'] is False
+          print('NEWS03 gate PASS')
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
-          name: news01-news02-high-impact-news-lab
+          name: news01-news03-high-impact-news-lab
           path: |
             results/latest/news01/
             results/latest/news02/
+            results/latest/news03/
           if-no-files-found: error
