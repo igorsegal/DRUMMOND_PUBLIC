@@ -1,0 +1,34 @@
+name: SMART TRADING UT03 MANIFEST PROBE
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/smart_trading_ut03_probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download manifests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: dataset03-drummond_canonical_8e9a1d784e3893d9
+        run: |
+          set -euo pipefail
+          mkdir -p .probe
+          gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .probe \
+            --pattern DATASET_MANIFEST.csv --pattern DATASET_SHARDS.csv --pattern DATASET_SYMBOLS.csv
+          echo '--- MANIFEST HEADER ---'
+          head -n 3 .probe/DATASET_MANIFEST.csv
+          echo '--- TARGET PAIRS ---'
+          grep -Ei '(^|;|,|"|/)(EURUSD|GBPUSD|AUDUSD|NZDUSD|USDCHF|USDJPY|USDCAD)(_|;|,|"|$)' .probe/DATASET_MANIFEST.csv | head -n 100 || true
+          echo '--- SHARDS ---'
+          cat .probe/DATASET_SHARDS.csv
+          echo '--- SYMBOLS TARGET ---'
+          grep -Ei 'EURUSD|GBPUSD|AUDUSD|NZDUSD|USDCHF|USDJPY|USDCAD' .probe/DATASET_SYMBOLS.csv || true
