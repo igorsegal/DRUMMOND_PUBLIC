@@ -14,6 +14,7 @@ on:
       - 'scripts/TM01A.py'
       - 'scripts/TM02.py'
       - 'scripts/TM03.py'
+      - 'scripts/TM04.py'
 
 permissions:
   contents: read
@@ -146,6 +147,19 @@ jobs:
           pattern: tm01-*
           path: .tm01_all
 
+      - name: Download XAUUSD M1 for price-only control
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag || 'takbir-m1-3sym-20260925-v1' }}
+        run: |
+          set -euo pipefail
+          mkdir -p .tm04_data
+          gh release download "$TAG" \
+            --repo "igorsegal/DRUMMOND_CLOUD" \
+            --dir ".tm04_data" \
+            --pattern "XAUUSD_M1.bin"
+
       - name: Aggregate TM01
         shell: bash
         run: |
@@ -169,6 +183,14 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           cat "results/latest/tm03/TM03.txt" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: TM04 XAUUSD price-only control
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/TM04.py --bin ".tm04_data/XAUUSD_M1.bin" --out "results/latest/tm04"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          cat "results/latest/tm04/TM04.txt" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
           name: takbir-m1-3sym-full
@@ -176,4 +198,5 @@ jobs:
             results/latest/tm01_full/
             results/latest/tm02/
             results/latest/tm03/
+            results/latest/tm04/
           if-no-files-found: error
