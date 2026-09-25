@@ -1,4 +1,4 @@
-name: NEWS01-NEWS02 HIGH-IMPACT NEWS LAB
+name: NEWS01-NEWS04 HIGH-IMPACT NEWS LAB
 
 on:
   workflow_dispatch:
@@ -13,6 +13,7 @@ on:
       - 'scripts/NEWS01.py'
       - 'scripts/NEWS02.py'
       - 'scripts/NEWS03.py'
+      - 'scripts/NEWS04.py'
 
 permissions:
   contents: read
@@ -31,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile scripts/NEWS01.py scripts/NEWS02.py scripts/NEWS03.py scripts/drummond_replay01.py
+          python -m py_compile scripts/NEWS01.py scripts/NEWS02.py scripts/NEWS03.py scripts/NEWS04.py scripts/drummond_replay01.py
 
       - name: Download pinned Forex Factory historical calendar
         shell: bash
@@ -153,11 +154,35 @@ jobs:
           print('NEWS03 gate PASS')
           PY
 
+      - name: Run NEWS04
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/NEWS04.py --events results/latest/news03/NEWS03_EVENTS.csv --out results/latest/news04
+          cat results/latest/news04/NEWS04.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: NEWS04 gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib
+          s=json.loads(pathlib.Path('results/latest/news04/NEWS04.json').read_text())
+          assert s['status']=='PASS'
+          c=s['contract']
+          assert c['same_timestamps_as_news03'] is True
+          assert c['same_dislocation_bins_as_news03'] is True
+          assert c['parameter_optimization'] is False
+          assert c['portfolio_pnl'] is False
+          print('NEWS04 gate PASS')
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
-          name: news01-news03-high-impact-news-lab
+          name: news01-news04-high-impact-news-lab
           path: |
             results/latest/news01/
             results/latest/news02/
             results/latest/news03/
+            results/latest/news04/
           if-no-files-found: error
