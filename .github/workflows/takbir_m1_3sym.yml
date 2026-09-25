@@ -7,6 +7,11 @@ on:
         description: Private DRUMMOND_CLOUD release tag containing EURUSD/XAUUSD/USDJPY M1 BINs
         required: true
         default: takbir-m1-3sym-20260925-v1
+  push:
+    paths:
+      - '.github/workflows/takbir_m1_3sym.yml'
+      - 'scripts/TM01.py'
+      - 'scripts/TM01A.py'
 
 permissions:
   contents: read
@@ -21,7 +26,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
-          TAG: ${{ inputs.dataset_tag }}
+          TAG: ${{ inputs.dataset_tag || 'takbir-m1-3sym-20260925-v1' }}
         run: |
           set -euo pipefail
           repo="igorsegal/DRUMMOND_CLOUD"
@@ -55,7 +60,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
-          TAG: ${{ inputs.dataset_tag }}
+          TAG: ${{ inputs.dataset_tag || 'takbir-m1-3sym-20260925-v1' }}
         run: |
           set -euo pipefail
           mkdir -p .tm01/data
@@ -67,15 +72,31 @@ jobs:
 
       - name: Verify SHA256
         shell: bash
+        env:
+          BIN: ${{ matrix.symbol }}_M1.bin
         run: |
           set -euo pipefail
           cd .tm01/data
-          expected="$(awk -F';' -v s="${{ matrix.symbol }}_M1.bin" '$1==s {print $2}' TAKBIR_M1_SHA256.csv | tr -d '\r')"
-          test -n "$expected"
-          actual="$(sha256sum "${{ matrix.symbol }}_M1.bin" | awk '{print $1}')"
-          echo "expected=$expected"
-          echo "actual=$actual"
-          test "$expected" = "$actual"
+          python - <<'PY'
+          import csv, hashlib, os, pathlib
+          name=os.environ["BIN"]
+          with open("TAKBIR_M1_SHA256.csv", newline="", encoding="ascii") as f:
+              rows=list(csv.DictReader(f, delimiter=";"))
+          match=[r for r in rows if r["FILE"]==name]
+          if len(match)!=1:
+              raise SystemExit(f"SHA manifest row not found/unique for {name}: {len(match)}")
+          expected=match[0]["SHA256"].strip().lower()
+          h=hashlib.sha256()
+          with open(name,"rb") as f:
+              for chunk in iter(lambda:f.read(8*1024*1024), b""):
+                  h.update(chunk)
+          actual=h.hexdigest()
+          print("expected="+expected)
+          print("actual  ="+actual)
+          if expected!=actual:
+              raise SystemExit("SHA256 mismatch")
+          print("SHA256 PASS")
+          PY
 
       - name: Run TM01
         shell: bash
