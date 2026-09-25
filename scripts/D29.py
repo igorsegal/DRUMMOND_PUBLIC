@@ -79,6 +79,7 @@ def main():
     robust=defaultdict(lambda:{"symbols":0,"pos_symbols":0})
     syms=0;trade_records=0;errs=[];skips=Counter()
     reconstruction_errors=0
+    diagnostic_skips=Counter()
 
     for h1p in sorted(a.data_root.rglob("*_H1.bin")):
         sym=h1p.name[:-7]
