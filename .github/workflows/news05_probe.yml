@@ -1,0 +1,27 @@
+name: NEWS05 CALENDAR PROBE
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/news05_probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch two historical Forex Factory weeks
+        shell: bash
+        run: |
+          set -euo pipefail
+          for WEEK in apr13.2025 jul15.2026; do
+            URL="https://www.forexfactory.com/calendar?week=$WEEK"
+            curl -L --fail --retry 3 -A 'Mozilla/5.0' "$URL" -o "$WEEK.html"
+            echo "WEEK=$WEEK BYTES=$(wc -c < "$WEEK.html")"
+            echo "HIGH_CLASS=$(grep -o 'calendar__impact--high' "$WEEK.html" | wc -l)"
+            echo "EVENT_ROWS=$(grep -o 'calendar__row' "$WEEK.html" | wc -l)"
+            grep -o -m 3 '.\{0,120\}calendar__impact--high.\{0,220\}' "$WEEK.html" || true
+          done
