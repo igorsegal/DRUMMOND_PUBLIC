@@ -7,6 +7,7 @@ from pathlib import Path
 from drummond_replay01 import read_xfbar
 import D25 as F
 import D27 as C
+import D21 as X
 
 DIM_FIELDS=["VARIANT","DIM","KEY","N","SUM_R","MEAN_R","POS_N","POS_RATE","MIN_R","MAX_R"]
 ROB_FIELDS=["VARIANT","DIM","KEY","SYMBOLS","POS_SYMBOLS","POS_SYMBOL_RATE"]
@@ -79,6 +80,8 @@ def main():
     robust=defaultdict(lambda:{"symbols":0,"pos_symbols":0})
     syms=0;trade_records=0;errs=[];skips=Counter()
     reconstruction_errors=0
+    reconstruction_reasons=Counter()
+    reconstruction_examples=[]
     diagnostic_skips=Counter()
 
     for h1p in sorted(a.data_root.rglob("*_H1.bin")):
@@ -97,6 +100,7 @@ def main():
             point=h1h["point"];syms+=1
             ctx,_=F.build_contexts(sym,h1,h4,m5,point)
             by_time={int(t):(idx,hi) for idx,t,hi,ma,mb,prev,sm,obs in ctx}
+            m5_by_time={int(b[0]):b for b in m5}
             local=defaultdict(newagg)
 
             for mode in C.MODES:
@@ -121,22 +125,52 @@ def main():
                     z=by_time.get(confirm)
                     if z is None:
                         reconstruction_errors+=1
+                        reconstruction_reasons["CONFIRM_CONTEXT_MISSING"]+=1
+                        if len(reconstruction_examples)<20:
+                            reconstruction_examples.append({"symbol":sym,"variant":variant,"entry_time":t["ENTRY_TIME"],"reason":"CONFIRM_CONTEXT_MISSING"})
                         continue
                     idx,hi=z
-                    entry=float(t["ENTRY"]);stop0=float(t["STOP0"])
                     d=1 if t["SIDE"]=="LONG" else -1
-                    risk=abs(entry-stop0)
-                    if not math.isfinite(risk) or risk<=point*0.5:
+
+                    # Reconstruct the exact D27 entry from the original M5 bar,
+                    # not from D27.csv's 10-decimal display string. This avoids
+                    # false geometry failures at a one-point boundary.
+                    entry_bar=m5_by_time.get(int(t["ENTRY_TIME"])-300)
+                    if entry_bar is None:
                         reconstruction_errors+=1
+                        reconstruction_reasons["ENTRY_M5_BAR_MISSING"]+=1
+                        if len(reconstruction_examples)<20:
+                            reconstruction_examples.append({"symbol":sym,"variant":variant,"entry_time":t["ENTRY_TIME"],"reason":"ENTRY_M5_BAR_MISSING"})
+                        continue
+                    entry=X.exec_entry(entry_bar,point,d)
+                    stop0=F.stop_for(h1,idx,point,entry,d)
+                    if stop0 is None:
+                        reconstruction_errors+=1
+                        reconstruction_reasons["STOP_RECONSTRUCTION_NONE"]+=1
+                        if len(reconstruction_examples)<20:
+                            reconstruction_examples.append({"symbol":sym,"variant":variant,"entry_time":t["ENTRY_TIME"],"reason":"STOP_RECONSTRUCTION_NONE"})
+                        continue
+                    risk=abs(entry-stop0)
+                    if not math.isfinite(risk) or risk<=point:
+                        reconstruction_errors+=1
+                        reconstruction_reasons["RISK_GEOMETRY_INVALID"]+=1
+                        if len(reconstruction_examples)<20:
+                            reconstruction_examples.append({"symbol":sym,"variant":variant,"entry_time":t["ENTRY_TIME"],"reason":"RISK_GEOMETRY_INVALID"})
                         continue
 
                     tp,ext=C.plan_targets(mode,h1,h4,idx,hi,point,entry,d)
                     if tp is None:
                         reconstruction_errors+=1
+                        reconstruction_reasons["TARGET_RECONSTRUCTION_NONE"]+=1
+                        if len(reconstruction_examples)<20:
+                            reconstruction_examples.append({"symbol":sym,"variant":variant,"entry_time":t["ENTRY_TIME"],"reason":"TARGET_RECONSTRUCTION_NONE"})
                         continue
                     tr=d*(tp-entry)/risk
                     if not math.isfinite(tr) or tr<=0:
                         reconstruction_errors+=1
+                        reconstruction_reasons["TARGET_R_INVALID"]+=1
+                        if len(reconstruction_examples)<20:
+                            reconstruction_examples.append({"symbol":sym,"variant":variant,"entry_time":t["ENTRY_TIME"],"reason":"TARGET_R_INVALID"})
                         continue
 
                     ext_present="YES" if ext is not None else "NO"
@@ -199,6 +233,8 @@ def main():
       "source":"D27","purpose":"causal entry-geometry attribution",
       "symbols":syms,"trade_records":trade_records,
       "errors":len(errs),"reconstruction_errors":reconstruction_errors,
+      "reconstruction_reasons":dict(reconstruction_reasons),
+      "reconstruction_examples":reconstruction_examples,
       "diagnostic_skips":dict(diagnostic_skips),"skips":dict(skips),
       "dimensions":[
         "ALL","SIDE","TARGET_R","STOP_H1","TARGET_H1",
@@ -208,6 +244,7 @@ def main():
         "source_engine":"D27",
         "d27_trading_logic_changed":False,
         "all_diagnostic_dimensions_known_at_entry":True,
+        "entry_geometry_replayed_from_original_m5_bar":True,
         "undefined_h1_normalization_is_skipped_not_imputed":True,
         "selection_or_optimization":False,
         "outcome_based_filtering":False,
@@ -221,7 +258,8 @@ def main():
 
     print("D29",summary["status"],"symbols",syms,"trade_records",trade_records,
           "errors",len(errs),"reconstruction_errors",reconstruction_errors,
-          "dims",len(dims),"years",len(years))
+          "reconstruction_reasons",dict(reconstruction_reasons),
+          "diagnostic_skips",dict(diagnostic_skips),"dims",len(dims),"years",len(years))
     if summary["status"]!="PASS":raise SystemExit(2)
 
 if __name__=="__main__":
