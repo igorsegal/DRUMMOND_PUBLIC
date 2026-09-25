@@ -1,0 +1,110 @@
+name: NEWS01 HIGH-IMPACT REGIME AUDIT
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_tag:
+        description: Canonical market dataset release tag
+        required: true
+        default: dataset03-drummond_canonical_8e9a1d784e3893d9
+  push:
+    paths:
+      - '.github/workflows/news01.yml'
+      - 'scripts/NEWS01.py'
+
+permissions:
+  contents: read
+
+jobs:
+  news01:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Syntax contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/NEWS01.py scripts/drummond_replay01.py
+
+      - name: Download pinned Forex Factory historical calendar
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .news
+          URL='https://huggingface.co/datasets/Ehsanrs2/Forex_Factory_Calendar/resolve/15b149147273bf740af46947bf2cb1176c04cf44/forex_factory_cache.csv?download=true'
+          curl -L --fail --retry 5 --retry-delay 3 "$URL" -o .news/forex_factory_cache.csv
+          echo 'f4e92bca4168cfe6e4598d3d2a69ac933dfd6c7c94550e056498a418e3efaf5e  .news/forex_factory_cache.csv' | sha256sum -c -
+          wc -c .news/forex_factory_cache.csv
+
+      - name: Download canonical manifest and FX shards
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag || 'dataset03-drummond_canonical_8e9a1d784e3893d9' }}
+        run: |
+          set -euo pipefail
+          mkdir -p .dataset
+          gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern DATASET_MANIFEST.csv
+          for n in 001 002 003 004 005 006; do
+            gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern "shard_${n}.zip"
+          done
+
+      - name: Extract and verify 28 M5 FX pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,hashlib,pathlib,zipfile
+          pairs=set('AUDCAD AUDCHF AUDJPY AUDNZD AUDUSD CADCHF CADJPY CHFJPY EURAUD EURCAD EURCHF EURGBP EURJPY EURNZD EURUSD GBPAUD GBPCAD GBPCHF GBPJPY GBPNZD GBPUSD NZDCAD NZDCHF NZDJPY NZDUSD USDCAD USDCHF USDJPY'.split())
+          with open('.dataset/DATASET_MANIFEST.csv',newline='',encoding='utf-8-sig') as f:
+              rows=[r for r in csv.DictReader(f) if r['symbol'] in pairs and r['tf']=='M5']
+          assert len(rows)==28, len(rows)
+          out=pathlib.Path('.fx');out.mkdir(exist_ok=True)
+          by={}
+          for r in rows: by.setdefault(r['shard'],[]).append(r)
+          for shard,rr in sorted(by.items()):
+              with zipfile.ZipFile(pathlib.Path('.dataset')/shard) as z:
+                  names=set(z.namelist())
+                  for r in rr:
+                      rel=r['relative_path'].replace('\\','/')
+                      if rel not in names: raise SystemExit('missing '+rel)
+                      z.extract(rel,out)
+                      p=out/rel
+                      h=hashlib.sha256(p.read_bytes()).hexdigest()
+                      if h.lower()!=r['sha256'].lower(): raise SystemExit('SHA mismatch '+rel)
+                      print('PASS',rel,r['bar_count'])
+          PY
+
+      - name: Run NEWS01
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/NEWS01.py --root .fx --calendar .news/forex_factory_cache.csv --out results/latest/news01
+          cat results/latest/news01/NEWS01.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib
+          s=json.loads(pathlib.Path('results/latest/news01/NEWS01.json').read_text())
+          assert s['status']=='PASS'
+          c=s['contract']
+          assert c['actual_forecast_previous_used'] is False
+          assert c['trading_or_pnl'] is False
+          assert c['parameter_optimization'] is False
+          assert s['calendar_high_impact_events']>1000
+          print('NEWS01 gate PASS')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: news01-high-impact-regime-audit
+          path: results/latest/news01/
+          if-no-files-found: error
