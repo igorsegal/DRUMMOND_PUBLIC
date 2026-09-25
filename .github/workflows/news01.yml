@@ -1,4 +1,4 @@
-name: NEWS01 HIGH-IMPACT REGIME AUDIT
+name: NEWS01-NEWS02 HIGH-IMPACT NEWS LAB
 
 on:
   workflow_dispatch:
@@ -11,6 +11,7 @@ on:
     paths:
       - '.github/workflows/news01.yml'
       - 'scripts/NEWS01.py'
+      - 'scripts/NEWS02.py'
 
 permissions:
   contents: read
@@ -29,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile scripts/NEWS01.py scripts/drummond_replay01.py
+          python -m py_compile scripts/NEWS01.py scripts/NEWS02.py scripts/drummond_replay01.py
 
       - name: Download pinned Forex Factory historical calendar
         shell: bash
@@ -87,7 +88,7 @@ jobs:
           python scripts/NEWS01.py --root .fx --calendar .news/forex_factory_cache.csv --out results/latest/news01
           cat results/latest/news01/NEWS01.txt >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Gate
+      - name: NEWS01 gate
         shell: bash
         run: |
           set -euo pipefail
@@ -103,8 +104,34 @@ jobs:
           print('NEWS01 gate PASS')
           PY
 
+      - name: Run NEWS02
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/NEWS02.py --root .fx --calendar .news/forex_factory_cache.csv --out results/latest/news02
+          cat results/latest/news02/NEWS02.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: NEWS02 gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib
+          s=json.loads(pathlib.Path('results/latest/news02/NEWS02.json').read_text())
+          assert s['status']=='PASS'
+          c=s['contract']
+          assert c['taxonomy_frozen_before_market_outcomes'] is True
+          assert c['actual_forecast_previous_used'] is False
+          assert c['trading_or_pnl'] is False
+          assert c['parameter_optimization'] is False
+          assert s['calendar_high_impact_events']>1000
+          print('NEWS02 gate PASS')
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
-          name: news01-high-impact-regime-audit
-          path: results/latest/news01/
+          name: news01-news02-high-impact-news-lab
+          path: |
+            results/latest/news01/
+            results/latest/news02/
           if-no-files-found: error
