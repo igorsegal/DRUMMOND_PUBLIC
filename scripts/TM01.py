@@ -43,16 +43,26 @@ def prepare_signals(bars,point):
         raise RuntimeError(",".join(r["errors"]))
     levels=r["levels"]
     out=[]
+
+    # Linear causal lookup of the latest confirmed Kimma/Yamma.
+    # The old implementation rescanned all levels for every Iqamat, which is
+    # acceptable on H1 but quadratic and impractical on multi-million-bar M1.
+    li=0
+    latest={"KIMMA":None,"YAMMA":None}
     for e in r["events"]:
         if not e["type"].startswith("IQAMAT"):
             continue
         i=int(e["idx"]); d=int(e["dir"])
-        known=[lv for lv in levels if lv["known_idx"]<=i]
+        while li<len(levels) and int(levels[li]["known_idx"])<=i:
+            lv=levels[li]
+            latest[lv["kind"]]=lv
+            li+=1
+
         opp_kind="YAMMA" if d>0 else "KIMMA"
-        opp=[lv for lv in known if lv["kind"]==opp_kind]
-        if not opp:
+        opp=latest[opp_kind]
+        if opp is None:
             continue
-        stop=float(opp[-1]["price"])
+        stop=float(opp["price"])
         trigger=float(bars[i][2])+point if d>0 else float(bars[i][3])-point
         risk=trigger-stop if d>0 else stop-trigger
         if not math.isfinite(risk) or risk<=point*0.5:
