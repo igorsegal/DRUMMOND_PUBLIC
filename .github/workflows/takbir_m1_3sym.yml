@@ -1,0 +1,137 @@
+name: TAKBIR M1 3SYM
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_tag:
+        description: Private DRUMMOND_CLOUD release tag containing EURUSD/XAUUSD/USDJPY M1 BINs
+        required: true
+        default: takbir-m1-3sym-20260925-v1
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify private M1 dataset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag }}
+        run: |
+          set -euo pipefail
+          repo="igorsegal/DRUMMOND_CLOUD"
+          assets="$(gh api "repos/$repo/releases/tags/$TAG" --jq '.assets[].name')"
+          for f in EURUSD_M1.bin XAUUSD_M1.bin USDJPY_M1.bin TAKBIR_M1_MANIFEST.csv TAKBIR_M1_SHA256.csv; do
+            echo "$assets" | grep -Fx "$f" >/dev/null || { echo "Missing asset: $f"; exit 2; }
+          done
+          echo "TAKBIR M1 preflight PASS"
+
+  symbol:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        symbol: [EURUSD, XAUUSD, USDJPY]
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Syntax contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/T01.py scripts/TM01.py scripts/TM01A.py scripts/drummond_replay01.py
+
+      - name: Download private M1 BIN
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p .tm01/data
+          gh release download "$TAG" \
+            --repo "igorsegal/DRUMMOND_CLOUD" \
+            --dir ".tm01/data" \
+            --pattern "${{ matrix.symbol }}_M1.bin" \
+            --pattern "TAKBIR_M1_SHA256.csv"
+
+      - name: Verify SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .tm01/data
+          expected="$(awk -F';' -v s="${{ matrix.symbol }}_M1.bin" '$1==s {print $2}' TAKBIR_M1_SHA256.csv | tr -d '\r')"
+          test -n "$expected"
+          actual="$(sha256sum "${{ matrix.symbol }}_M1.bin" | awk '{print $1}')"
+          echo "expected=$expected"
+          echo "actual=$actual"
+          test "$expected" = "$actual"
+
+      - name: Run TM01
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/TM01.py \
+            --bin ".tm01/data/${{ matrix.symbol }}_M1.bin" \
+            --out "results/latest/tm01/${{ matrix.symbol }}"
+
+      - name: Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, pathlib
+          p=pathlib.Path("results/latest/tm01/${{ matrix.symbol }}/${{ matrix.symbol }}_TM01.json")
+          s=json.loads(p.read_text())
+          assert s["status"]=="PASS", s
+          assert s["contract"]["lookahead"] is False
+          assert s["contract"]["selection_or_optimization"] is False
+          assert s["contract"]["timeframe"]=="M1"
+          print("TM01 gate PASS")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tm01-${{ matrix.symbol }}
+          path: |
+            results/latest/tm01/${{ matrix.symbol }}/${{ matrix.symbol }}_TM01_TRADES.csv
+            results/latest/tm01/${{ matrix.symbol }}/${{ matrix.symbol }}_TM01.json
+            results/latest/tm01/${{ matrix.symbol }}/${{ matrix.symbol }}_TM01.txt
+          if-no-files-found: error
+
+  aggregate:
+    needs: symbol
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: tm01-*
+          path: .tm01_all
+
+      - name: Aggregate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/TM01A.py --root ".tm01_all" --out "results/latest/tm01_full"
+          cat "results/latest/tm01_full/TM01.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: takbir-m1-3sym-full
+          path: results/latest/tm01_full/
+          if-no-files-found: error
