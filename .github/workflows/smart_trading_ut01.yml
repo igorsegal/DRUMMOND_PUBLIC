@@ -1,0 +1,105 @@
+name: SMART TRADING UT01
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_tag:
+        description: Private DRUMMOND_CLOUD release tag containing XAUUSD M1 BIN
+        required: true
+        default: takbir-m1-3sym-20260925-v1
+  push:
+    paths:
+      - '.github/workflows/smart_trading_ut01.yml'
+      - 'scripts/UT01.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  ut01:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Syntax contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/UT01.py scripts/drummond_replay01.py
+
+      - name: Download private XAUUSD M1
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag || 'takbir-m1-3sym-20260925-v1' }}
+        run: |
+          set -euo pipefail
+          mkdir -p .ut01_data
+          gh release download "$TAG" \
+            --repo "igorsegal/DRUMMOND_CLOUD" \
+            --dir ".ut01_data" \
+            --pattern "XAUUSD_M1.bin" \
+            --pattern "TAKBIR_M1_SHA256.csv"
+
+      - name: Verify SHA256
+        shell: bash
+        env:
+          BIN: XAUUSD_M1.bin
+        run: |
+          set -euo pipefail
+          cd .ut01_data
+          python - <<'PY'
+          import csv, hashlib, os
+          name=os.environ["BIN"]
+          with open("TAKBIR_M1_SHA256.csv", newline="", encoding="ascii") as f:
+              rows=list(csv.DictReader(f, delimiter=";"))
+          match=[r for r in rows if r["FILE"]==name]
+          if len(match)!=1:
+              raise SystemExit(f"SHA manifest row not found/unique for {name}: {len(match)}")
+          expected=match[0]["SHA256"].strip().lower()
+          h=hashlib.sha256()
+          with open(name,"rb") as f:
+              for chunk in iter(lambda:f.read(8*1024*1024), b""):
+                  h.update(chunk)
+          actual=h.hexdigest()
+          print("expected="+expected)
+          print("actual  ="+actual)
+          if expected!=actual:
+              raise SystemExit("SHA256 mismatch")
+          print("SHA256 PASS")
+          PY
+
+      - name: Run UT01
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/UT01.py \
+            --bin ".ut01_data/XAUUSD_M1.bin" \
+            --out "results/latest/ut01"
+          cat "results/latest/ut01/UT01.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, pathlib
+          p=pathlib.Path("results/latest/ut01/UT01.json")
+          s=json.loads(p.read_text())
+          assert s["status"]=="PASS", s
+          assert s["contract"]["trading_or_pnl"] is False
+          assert s["contract"]["parameter_optimization"] is False
+          assert s["contract"]["full_author_wave_labelling_claimed"] is False
+          print("UT01 gate PASS")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smart-trading-ut01
+          path: results/latest/ut01/
+          if-no-files-found: error
