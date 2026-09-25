@@ -1,0 +1,141 @@
+name: D28
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/d28.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  preflight:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify private dataset access
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) { throw "DRUMMOND_DATA_TOKEN secret is not configured" }
+
+          $repo = "igorsegal/DRUMMOND_CLOUD"
+          $tag = "dataset03-drummond_canonical_8e9a1d784e3893d9"
+          $assets = @(gh api "repos/$repo/releases/tags/$tag" --jq ".assets[].name")
+          if ($LASTEXITCODE -ne 0) { throw "Cannot access private dataset release." }
+
+          $required = @(
+            "DATASET_MANIFEST.json",
+            "DATASET_SYMBOLS.csv",
+            "shard_001.zip",
+            "shard_002.zip",
+            "shard_003.zip",
+            "shard_004.zip",
+            "shard_005.zip",
+            "shard_006.zip",
+            "shard_007.zip"
+          )
+          foreach ($name in $required) {
+            if ($assets -notcontains $name) { throw "Private dataset release is missing required asset: $name" }
+          }
+          Write-Host "D28 preflight PASS: private release is readable and all required assets are present."
+
+  shard:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [shard_001.zip,shard_002.zip,shard_003.zip,shard_004.zip,shard_005.zip,shard_006.zip,shard_007.zip]
+    runs-on: windows-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Contract
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/D17.py scripts/D21.py scripts/D23.py scripts/D25.py scripts/D27.py scripts/D28.py scripts/D28A.py
+          if ($LASTEXITCODE -ne 0) { throw "D28 syntax failed" }
+          python scripts/D23.py
+          if ($LASTEXITCODE -ne 0) { throw "D23 contract failed" }
+
+      - name: Download private canonical shard
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) { throw "DRUMMOND_DATA_TOKEN secret is not configured" }
+          New-Item -ItemType Directory -Force -Path ".d28/pkg",".d28/data" | Out-Null
+          gh release download "dataset03-drummond_canonical_8e9a1d784e3893d9" --repo "igorsegal/DRUMMOND_CLOUD" --dir ".d28/pkg" --pattern "DATASET_MANIFEST.json" --pattern "DATASET_SYMBOLS.csv" --pattern "${{ matrix.shard }}"
+          if ($LASTEXITCODE -ne 0) { throw "Private dataset download failed" }
+          python scripts/data_bridge_verify02.py --package-dir ".d28/pkg" --out-root ".d28/data" --expected-dataset-id "DRUMMOND_CANONICAL_8E9A1D784E3893D9" --shard "${{ matrix.shard }}"
+          if ($LASTEXITCODE -ne 0) { throw "Dataset verification failed" }
+
+      - name: Run D28 loss attribution
+        shell: pwsh
+        run: |
+          python scripts/D28.py --data-root ".d28/data" --out "results/latest/d28/${{ matrix.shard }}"
+          if ($LASTEXITCODE -ne 0) { throw "D28 shard failed" }
+
+      - name: Gate
+        shell: pwsh
+        run: |
+          $s=Get-Content "results/latest/d28/${{ matrix.shard }}/D28.json" -Raw | ConvertFrom-Json
+          if ($s.status -ne "PASS") { throw "D28 shard not PASS" }
+          if ([int]$s.errors -ne 0) { throw "D28 errors" }
+          if ([bool]$s.contract.d27_trading_logic_changed) { throw "D28 changed D27 trading logic" }
+          if ([bool]$s.contract.selection_or_optimization) { throw "D28 optimization violation" }
+          if ([bool]$s.contract.outcome_based_filtering) { throw "D28 outcome filter violation" }
+          if (-not [bool]$s.contract.diagnostic_only) { throw "D28 must be diagnostic only" }
+          if ([bool]$s.contract.lookahead) { throw "D28 lookahead violation" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d28-${{ matrix.shard }}
+          path: |
+            results/latest/d28/${{ matrix.shard }}/D28.csv
+            results/latest/d28/${{ matrix.shard }}/D28R.csv
+            results/latest/d28/${{ matrix.shard }}/D28Y.csv
+            results/latest/d28/${{ matrix.shard }}/D28.json
+            results/latest/d28/${{ matrix.shard }}/D28_ERR.json
+          if-no-files-found: error
+
+  aggregate:
+    needs: shard
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: d28-*
+          path: .d28a
+      - name: Aggregate
+        shell: pwsh
+        run: |
+          python scripts/D28A.py --root ".d28a" --out "results/latest/d28_full"
+          if ($LASTEXITCODE -ne 0) { throw "D28 aggregate failed" }
+          $s=Get-Content "results/latest/d28_full/D28.json" -Raw | ConvertFrom-Json
+          if ($s.status -ne "PASS") { throw "D28 aggregate not PASS" }
+          if ([bool]$s.contract.d27_trading_logic_changed) { throw "D28 changed D27 trading logic" }
+          if ([bool]$s.contract.selection_or_optimization) { throw "D28 optimization violation" }
+          if ([bool]$s.contract.outcome_based_filtering) { throw "D28 outcome filter violation" }
+          if (-not [bool]$s.contract.diagnostic_only) { throw "D28 must be diagnostic only" }
+          if ([bool]$s.contract.lookahead) { throw "D28 lookahead violation" }
+          if ([bool]$s.contract.promotion_allowed) { throw "D28 promotion forbidden" }
+          Get-Content "results/latest/d28_full/D28.txt" | Add-Content $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d28-full
+          path: results/latest/d28_full/
+          if-no-files-found: error
