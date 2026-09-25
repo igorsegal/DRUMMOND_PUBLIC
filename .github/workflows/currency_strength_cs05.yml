@@ -1,0 +1,103 @@
+name: CURRENCY STRENGTH CS05
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_tag:
+        description: Canonical dataset release tag
+        required: true
+        default: dataset03-drummond_canonical_8e9a1d784e3893d9
+  push:
+    paths:
+      - '.github/workflows/currency_strength_cs05.yml'
+      - 'scripts/CS05.py'
+
+permissions:
+  contents: read
+
+jobs:
+  cs05:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Syntax contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/CS05.py scripts/drummond_replay01.py
+
+      - name: Download canonical manifest and FX shards
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag || 'dataset03-drummond_canonical_8e9a1d784e3893d9' }}
+        run: |
+          set -euo pipefail
+          mkdir -p .dataset
+          gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern DATASET_MANIFEST.csv
+          for n in 001 002 003 004 005 006; do
+            gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern "shard_${n}.zip"
+          done
+
+      - name: Extract and verify 28 H4 FX pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,hashlib,pathlib,zipfile
+          pairs=set('AUDCAD AUDCHF AUDJPY AUDNZD AUDUSD CADCHF CADJPY CHFJPY EURAUD EURCAD EURCHF EURGBP EURJPY EURNZD EURUSD GBPAUD GBPCAD GBPCHF GBPJPY GBPNZD GBPUSD NZDCAD NZDCHF NZDJPY NZDUSD USDCAD USDCHF USDJPY'.split())
+          with open('.dataset/DATASET_MANIFEST.csv',newline='',encoding='utf-8-sig') as f:
+              rows=[r for r in csv.DictReader(f) if r['symbol'] in pairs and r['tf']=='H4']
+          assert len(rows)==28, len(rows)
+          out=pathlib.Path('.fx');out.mkdir(exist_ok=True)
+          by={}
+          for r in rows: by.setdefault(r['shard'],[]).append(r)
+          for shard,rr in sorted(by.items()):
+              zp=pathlib.Path('.dataset')/shard
+              with zipfile.ZipFile(zp) as z:
+                  names=set(z.namelist())
+                  for r in rr:
+                      rel=r['relative_path'].replace('\\','/')
+                      if rel not in names: raise SystemExit('missing in shard '+rel)
+                      z.extract(rel,out)
+                      p=out/rel
+                      h=hashlib.sha256(p.read_bytes()).hexdigest()
+                      if h.lower()!=r['sha256'].lower(): raise SystemExit('SHA mismatch '+rel)
+                      print('PASS',rel,r['bar_count'])
+          PY
+
+      - name: Run CS05
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/CS05.py --root .fx --out results/latest/cs05
+          cat results/latest/cs05/CS05.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib
+          s=json.loads(pathlib.Path('results/latest/cs05/CS05.json').read_text())
+          assert s['status']=='PASS'
+          c=s['contract']
+          assert c['feature_frozen_before_cross_pair_test'] is True
+          assert c['target_pair_excluded_from_strength'] is True
+          assert c['trading_or_pnl'] is False
+          assert c['parameter_optimization'] is False
+          assert c['target_selection'] is False
+          assert len(s['targets'])==6
+          print('CS05 gate PASS')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: currency-strength-cs05
+          path: results/latest/cs05/
+          if-no-files-found: error
