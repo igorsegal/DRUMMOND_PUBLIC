@@ -33,6 +33,8 @@ def parse_clock(text):
     x=text.strip().lower().replace(" ","")
     if not x or x in {"allday","tentative"}:
         return None
+    if not re.fullmatch(r"\d{1,2}:\d{2}(am|pm)",x):
+        return None
     return datetime.strptime(x,"%I:%M%p").time()
 
 def scrape(month_name, year, out):
