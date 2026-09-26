@@ -1,0 +1,75 @@
+name: NEWS26 GO COLLECT
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/news26_go.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.24.x'
+      - name: Collect historical calendar in UTC
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run github.com/Nosvemos/forexfactory-go/cmd/forexfactory-go@v0.1.0 download \
+            -s 2026-01-01 -e 2026-09-26 -f csv -o raw.csv -t UTC -c 1 -r 1
+          echo 'RAW HEAD:'
+          head -5 raw.csv || true
+      - name: Normalize for MT4
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,datetime,pathlib
+          CUR={'AUD','CAD','CHF','EUR','GBP','JPY','NZD','USD'}
+          with open('raw.csv',encoding='utf-8-sig',newline='') as f:
+              rd=csv.DictReader(f)
+              rows=list(rd)
+              print('FIELDS',rd.fieldnames)
+          def pick(r,*names):
+              for n in names:
+                  if n in r and r[n] not in (None,''): return r[n]
+              return ''
+          out=[]
+          for r in rows:
+              cur=pick(r,'currency','Currency','country','Country').strip().upper()
+              imp=pick(r,'impact','Impact','impact_level','ImpactLevel').strip().lower()
+              if cur not in CUR or imp!='high': continue
+              title=pick(r,'title','Title','event','Event').strip()
+              ds=pick(r,'date','Date','datetime','DateTime','timestamp','Timestamp').strip()
+              if not ds or not title: continue
+              try:
+                  dt=datetime.datetime.fromisoformat(ds.replace('Z','+00:00'))
+                  if dt.tzinfo is None: dt=dt.replace(tzinfo=datetime.timezone.utc)
+                  dt=dt.astimezone(datetime.timezone.utc)
+              except Exception:
+                  print('BAD DATE',ds,r); continue
+              out.append({
+                'UTC_TIME':dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'CURRENCY':cur,'IMPACT':'HIGH','EVENT':title
+              })
+          uniq={(r['UTC_TIME'],r['CURRENCY'],r['EVENT']):r for r in out}
+          out=sorted(uniq.values(),key=lambda r:(r['UTC_TIME'],r['CURRENCY'],r['EVENT']))
+          if len(out)<100: raise SystemExit(f'too few high-impact events: {len(out)}')
+          p=pathlib.Path('NEWS26.csv')
+          with p.open('w',encoding='utf-8',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=['UTC_TIME','CURRENCY','IMPACT','EVENT'],delimiter=';')
+              w.writeheader();w.writerows(out)
+          print('NEWS26',len(out),'FIRST',out[0]['UTC_TIME'],'LAST',out[-1]['UTC_TIME'])
+          for c in sorted(CUR): print(c,sum(r['CURRENCY']==c for r in out))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NEWS26
+          path: NEWS26.csv
+          if-no-files-found: error
