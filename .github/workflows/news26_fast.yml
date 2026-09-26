@@ -1,0 +1,109 @@
+name: BUILD NEWS26 FAST
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/news26_fast.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install scraper deps
+        run: pip install selenium==4.13.0 pytz==2024.2
+      - name: Scrape 2026 high-impact calendar
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,re,time
+          from datetime import datetime,timezone,date
+          import pytz
+          from selenium import webdriver
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.support.ui import WebDriverWait
+          from selenium.webdriver.support import expected_conditions as EC
+
+          months=['january','february','march','april','may','june','july','august','september']
+          allowed={'AUD','CAD','CHF','EUR','GBP','JPY','NZD','USD'}
+          rows_out=[]; seen=set()
+
+          def driver_new():
+              o=webdriver.ChromeOptions()
+              o.add_argument('--headless=new');o.add_argument('--no-sandbox')
+              o.add_argument('--disable-dev-shm-usage');o.add_argument('--disable-gpu')
+              o.add_argument('--window-size=1920,1080')
+              o.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36')
+              return webdriver.Chrome(options=o)
+
+          for mi,m in enumerate(months):
+              d=driver_new()
+              try:
+                  url=f'https://www.forexfactory.com/calendar?month={m}'
+                  d.set_page_load_timeout(35)
+                  d.get(url)
+                  WebDriverWait(d,25).until(EC.presence_of_element_located((By.CLASS_NAME,'calendar__table')))
+                  source_tz=d.execute_script("return Intl.DateTimeFormat().resolvedOptions().timeZone")
+                  trs=d.find_elements(By.CSS_SELECTOR,'tr.calendar__row')
+                  print(m,'timezone',source_tz,'rows',len(trs))
+                  assert len(trs)>100,(m,len(trs))
+                  current_date=None; current_time=None
+                  z=pytz.timezone(source_tz)
+                  for tr in trs:
+                      txt=tr.text.strip()
+                      if 'calendar__row--day-breaker' in (tr.get_attribute('class') or ''):
+                          mm=re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})',txt)
+                          if mm:
+                              current_date=datetime.strptime(f'{mm.group(1)} {mm.group(2)} 2026','%b %d %Y').date()
+                          continue
+                      if not tr.get_attribute('data-event-id'): continue
+                      try:
+                          dc=tr.find_elements(By.CSS_SELECTOR,'.calendar__date')
+                          if dc and dc[0].text.strip():
+                              mm=re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})',dc[0].text)
+                              if mm: current_date=datetime.strptime(f'{mm.group(1)} {mm.group(2)} 2026','%b %d %Y').date()
+                          tc=tr.find_element(By.CSS_SELECTOR,'.calendar__time').text.strip()
+                          if tc: current_time=tc
+                          cur=tr.find_element(By.CSS_SELECTOR,'.calendar__currency').text.strip().upper()
+                          impact=tr.find_element(By.CSS_SELECTOR,'.calendar__impact span').get_attribute('class') or ''
+                          name=tr.find_element(By.CSS_SELECTOR,'.calendar__event-title').text.strip()
+                      except Exception:
+                          continue
+                      if 'ff-impact-red' not in impact or cur not in allowed: continue
+                      if not current_date or not current_time or current_time.lower() in {'all day','tentative'}: continue
+                      try:
+                          naive=datetime.strptime(f'{current_date.isoformat()} {current_time}','%Y-%m-%d %I:%M%p')
+                          local=z.localize(naive,is_dst=None)
+                          utc=local.astimezone(timezone.utc)
+                      except Exception:
+                          continue
+                      if utc.year!=2026 or utc.date()>date(2026,9,26): continue
+                      key=(utc,cur,name)
+                      if key in seen: continue
+                      seen.add(key);rows_out.append(key)
+              finally:
+                  d.quit()
+              time.sleep(4)
+
+          rows_out.sort()
+          with open('NEWS26.csv','w',encoding='utf-8',newline='') as f:
+              w=csv.writer(f,delimiter=';',lineterminator='\n')
+              w.writerow(['UTC_TIME','CURRENCY','IMPACT','EVENT'])
+              for utc,cur,name in rows_out:
+                  w.writerow([utc.strftime('%Y-%m-%dT%H:%M:%SZ'),cur,'HIGH',name.replace(';',',')])
+          print('EVENTS',len(rows_out),'FIRST',rows_out[0] if rows_out else None,'LAST',rows_out[-1] if rows_out else None)
+          assert len(rows_out)>300,len(rows_out)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NEWS26
+          path: NEWS26.csv
+          if-no-files-found: error
