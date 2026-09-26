@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go run github.com/Nosvemos/forexfactory-go/cmd/forexfactory-go@v0.1.0 download \
+          xvfb-run -a go run github.com/Nosvemos/forexfactory-go/cmd/forexfactory-go@v0.1.0 download \
             -s 2026-01-01 -e 2026-09-26 -f csv -o raw.csv -t UTC -c 1 -r 1
           echo 'RAW HEAD:'
           head -5 raw.csv || true
