@@ -1,0 +1,48 @@
+name: NEWS2026 RED PROBE
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/news2026_redprobe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install selenium==4.13.0
+      - shell: bash
+        run: |
+          python - <<'PY'
+          from selenium import webdriver
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.support.ui import WebDriverWait
+          from selenium.webdriver.support import expected_conditions as EC
+          o=webdriver.ChromeOptions()
+          for a in ['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--window-size=1920,1080','--lang=en-US']: o.add_argument(a)
+          o.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36')
+          d=webdriver.Chrome(options=o)
+          try:
+            d.execute_cdp_cmd('Emulation.setTimezoneOverride',{'timezoneId':'UTC'})
+            d.get('https://www.forexfactory.com/calendar?range=jan1.2026-jan31.2026')
+            WebDriverWait(d,30).until(EC.presence_of_element_located((By.CLASS_NAME,'calendar__table')))
+            rows=d.find_elements(By.CSS_SELECTOR,'tr.calendar__row')
+            red=[]
+            for r in rows:
+              im=r.find_elements(By.CSS_SELECTOR,'.calendar__impact span')
+              if not im: continue
+              cls=(im[0].get_attribute('class') or '').lower()
+              title=(im[0].get_attribute('title') or '').lower()
+              if 'ff-impact-red' not in cls and 'high impact expected' not in title: continue
+              red.append((r.get_attribute('data-event-id'),r.text.replace('\n',' | '),cls,title))
+            print('ROWS',len(rows),'RED',len(red))
+            for x in red: print('REDROW',x)
+          finally: d.quit()
+          PY
