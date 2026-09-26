@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: news26-build
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,6 +30,14 @@ jobs:
           cd ffbridge
           git checkout b8b8dd24c9f281975398b5c58c3e931110b96909
           pip install -r requirements.txt
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('ff_calendar_toolkit/scraper.py')
+          s=p.read_text()
+          s=s.replace('time.sleep(2)', 'time.sleep(0.10)')
+          p.write_text(s)
+          print('patched scraper scroll sleep')
+          PY
 
       - name: Scrape 2026 Jan-Sep high-impact calendar in UTC
         shell: bash
