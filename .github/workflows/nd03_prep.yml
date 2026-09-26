@@ -1,0 +1,135 @@
+name: ND03 PREP
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_tag:
+        description: Canonical dataset release tag
+        required: true
+        default: dataset03-drummond_canonical_8e9a1d784e3893d9
+  push:
+    paths:
+      - '.github/workflows/nd03_prep.yml'
+      - 'scripts/ND03_PREP.py'
+      - 'ND03/ND03.mq4'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Syntax
+        run: python -m py_compile scripts/ND03_PREP.py scripts/drummond_replay01.py
+
+      - name: Download frozen NEWS2026 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .news
+          gh run download 36243573530 --repo igorsegal/DRUMMOND_PUBLIC --name NEWS2026 --dir .news
+          test -s .news/NEWS2026.csv
+          cp .news/NEWS2026.csv .news/NEWS26.csv
+          echo "NEWS rows=$(( $(wc -l < .news/NEWS26.csv) - 1 ))"
+
+      - name: Download canonical manifest
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag || 'dataset03-drummond_canonical_8e9a1d784e3893d9' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .dataset
+          gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern DATASET_MANIFEST.csv
+
+      - name: Resolve required seven USD M5 legs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,pathlib
+          need=set("AUDUSD USDCAD USDCHF EURUSD GBPUSD NZDUSD USDJPY".split())
+          with open('.dataset/DATASET_MANIFEST.csv',newline='',encoding='utf-8-sig') as f:
+              rows=[r for r in csv.DictReader(f) if r.get('symbol') in need and r.get('tf')=='M5']
+          assert len(rows)==7, (len(rows), sorted((r.get('symbol'),r.get('tf')) for r in rows))
+          shards=sorted(set(r['shard'] for r in rows))
+          pathlib.Path('.dataset/needed_shards.txt').write_text('\n'.join(shards)+'\n')
+          print('LEGS',sorted(r['symbol'] for r in rows))
+          print('SHARDS',shards)
+          PY
+
+      - name: Download only required shards
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag || 'dataset03-drummond_canonical_8e9a1d784e3893d9' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read S; do
+            echo "[DOWNLOAD] $S"
+            gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern "$S"
+          done < .dataset/needed_shards.txt
+
+      - name: Extract and verify seven USD M5 legs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,hashlib,pathlib,zipfile
+          need=set("AUDUSD USDCAD USDCHF EURUSD GBPUSD NZDUSD USDJPY".split())
+          with open('.dataset/DATASET_MANIFEST.csv',newline='',encoding='utf-8-sig') as f:
+              rows=[r for r in csv.DictReader(f) if r.get('symbol') in need and r.get('tf')=='M5']
+          out=pathlib.Path('.fx'); out.mkdir(exist_ok=True)
+          by={}
+          for r in rows: by.setdefault(r['shard'],[]).append(r)
+          for shard,rr in by.items():
+              zp=pathlib.Path('.dataset')/shard
+              with zipfile.ZipFile(zp) as z:
+                  names=set(z.namelist())
+                  for r in rr:
+                      rel=r['relative_path'].replace('\\','/')
+                      assert rel in names, rel
+                      z.extract(rel,out)
+                      p=out/rel
+                      h=hashlib.sha256(p.read_bytes()).hexdigest()
+                      assert h.lower()==r['sha256'].lower(), rel
+                      print('PASS',r['symbol'],r['tf'],r['bar_count'],rel)
+          PY
+
+      - name: Build USD26 external-strength file
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/ND03_PREP.py --root .fx --news .news/NEWS26.csv --out results/latest/nd03
+          cat results/latest/nd03/ND03.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,pathlib
+          p=pathlib.Path('results/latest/nd03/USD26.csv')
+          assert p.exists() and p.stat().st_size>100
+          rows=list(csv.DictReader(p.open(encoding='utf-8-sig'),delimiter=';'))
+          assert rows
+          assert all(r['LEG_COUNT']=='7' for r in rows)
+          assert all(r['UTC_TIME'].startswith('2026-') for r in rows)
+          print('ND03 GATE PASS rows',len(rows),'first',rows[0]['UTC_TIME'],'last',rows[-1]['UTC_TIME'])
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nd03-precomputed-usd
+          path: results/latest/nd03/
+          if-no-files-found: error
