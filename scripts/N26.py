@@ -21,7 +21,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 CURS={"AUD","CAD","CHF","EUR","GBP","JPY","NZD","USD"}
-SOURCE_TZ=ZoneInfo("America/Chicago")
 MON={"jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
      "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12}
 MON_REV={v:k for k,v in MON.items()}
@@ -47,6 +46,17 @@ def parse_clock(text:str):
     if not re.fullmatch(r"\d{1,2}:\d{2}(am|pm)",x):
         return None
     return datetime.strptime(x,"%I:%M%p").time()
+
+def detect_source_timezone(html:str)->str:
+    m=re.search(r"timezone_name:\s*['\"]([^'\"]+)['\"]",html)
+    if not m:
+        raise RuntimeError("Forex Factory timezone_name not found in page HTML")
+    tz=m.group(1).strip()
+    try:
+        ZoneInfo(tz)
+    except Exception as e:
+        raise RuntimeError(f"unsupported Forex Factory timezone {tz!r}: {e}")
+    return tz
 
 def driver():
     opt=webdriver.ChromeOptions()
@@ -94,9 +104,10 @@ def scrape_range(start:date, end:date):
             time.sleep(0.3)
 
             rows=d.find_elements(By.CSS_SELECTOR,"tr.calendar__row")
-            body=d.find_element(By.TAG_NAME,"body").text
-            tz=[x.strip() for x in body.splitlines() if "Calendar Time Zone:" in x]
-            print("RANGE",start,end,"ROWS",len(rows),"TZ",tz[:2],"URL",d.current_url)
+            source_tz_name=detect_source_timezone(d.page_source)
+            source_tz=ZoneInfo(source_tz_name)
+            print("RANGE",start,end,"ROWS",len(rows),
+                  "SOURCE_TZ",source_tz_name,"URL",d.current_url)
 
             if len(rows)<5:
                 raise RuntimeError(f"too few rows: {len(rows)}")
@@ -150,7 +161,7 @@ def scrape_range(start:date, end:date):
                 if cur not in CURS or not high or not event:
                     continue
 
-                local_dt=datetime.combine(current_date,current_time,tzinfo=SOURCE_TZ)
+                local_dt=datetime.combine(current_date,current_time,tzinfo=source_tz)
                 utc_dt=local_dt.astimezone(timezone.utc)
                 out.append({
                     "UTC_TIME":utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -159,7 +170,7 @@ def scrape_range(start:date, end:date):
                     "EVENT":event,
                     "SOURCE_EVENT_ID":row.get_attribute("data-event-id") or "",
                     "SOURCE_TIME_LOCAL":local_dt.strftime("%Y-%m-%dT%H:%M:%S"),
-                    "SOURCE_TIMEZONE":"America/Chicago",
+                    "SOURCE_TIMEZONE":source_tz_name,
                     "SOURCE_RANGE":f"{start.isoformat()}..{end.isoformat()}",
                 })
 
@@ -228,27 +239,37 @@ def main():
         dt=datetime.fromisoformat(r["UTC_TIME"].replace("Z","+00:00"))
         assert dt.year==a.year and dt.month==m
         assert r["CURRENCY"] in CURS and r["IMPACT"]=="HIGH"
-        assert r["SOURCE_TIMEZONE"]=="America/Chicago"
+        assert r["SOURCE_TIMEZONE"]
 
-    # Forex Factory was observed on GitHub-hosted runners in Central time.
-    # Fail closed if a standard 08:30 ET US release is not shown as 07:30 CT;
-    # this prevents silently writing a shifted UTC calendar if FF defaults change.
+    # Independent UTC sanity check. These US releases are conventionally 08:30
+    # America/New_York. We do NOT assume the Forex Factory display timezone;
+    # instead the page's own timezone_name is used above and the final UTC time
+    # must match 08:30 New York for these anchor events.
     anchors={"Non-Farm Employment Change","Unemployment Claims",
              "CPI m/m","Core CPI m/m","PPI m/m","Core PPI m/m"}
+    ny=ZoneInfo("America/New_York")
     checked=0
     for r in rows:
         if r["CURRENCY"]=="USD" and r["EVENT"] in anchors:
-            hhmm=r["SOURCE_TIME_LOCAL"][11:16]
-            if hhmm!="07:30":
+            got=datetime.fromisoformat(r["UTC_TIME"].replace("Z","+00:00"))
+            local_day=got.astimezone(ny).date()
+            expected=datetime.combine(local_day,datetime.strptime("08:30","%H:%M").time(),tzinfo=ny).astimezone(timezone.utc)
+            if got!=expected:
                 raise SystemExit(
-                    f"SOURCE_TZ_CONTRACT_FAIL {r['EVENT']} local={hhmm} "
-                    "expected 07:30 America/Chicago"
+                    f"UTC_ANCHOR_FAIL {r['EVENT']} got={got.isoformat()} "
+                    f"expected={expected.isoformat()} source_tz={r['SOURCE_TIMEZONE']} "
+                    f"source_local={r['SOURCE_TIME_LOCAL']}"
                 )
             checked+=1
     if checked==0:
-        print("SOURCE_TZ_ANCHOR_WARN no standard USD 08:30 ET anchor in month")
+        print("UTC_ANCHOR_WARN no standard USD 08:30 ET anchor in month")
     else:
-        print("SOURCE_TZ_CONTRACT_PASS anchors",checked)
+        print("UTC_ANCHOR_PASS anchors",checked)
+
+    tz_counts={}
+    for r in rows:
+        tz_counts[r["SOURCE_TIMEZONE"]]=tz_counts.get(r["SOURCE_TIMEZONE"],0)+1
+    print("SOURCE_TIMEZONES",tz_counts)
 
     a.out.parent.mkdir(parents=True,exist_ok=True)
     with a.out.open("w",encoding="utf-8",newline="") as f:
