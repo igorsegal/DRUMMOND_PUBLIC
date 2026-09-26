@@ -412,4 +412,63 @@ bool ND02_ExternalCurrencyStrength(const string currency,
    return MathIsValidNumber(strength);
 }
 
+
+bool ND02_GetOrientedZServer(const string a,
+                             const string b,
+                             const datetime eventServer,
+                             double &out)
+{
+   out=0.0;
+
+   int i=ND02_FindCanonicalPairIndex(a+b);
+   if(i>=0)
+      return ND02_PairZ30(i,ND02_AlignUpM5(eventServer),out);
+
+   i=ND02_FindCanonicalPairIndex(b+a);
+   if(i>=0)
+   {
+      double z=0.0;
+      if(!ND02_PairZ30(i,ND02_AlignUpM5(eventServer),z))
+         return false;
+      out=-z;
+      return true;
+   }
+
+   ND02_LastBasketFailSymbol=a+b;
+   ND02_LastBasketFailReason="PAIR_NOT_FOUND";
+   return false;
+}
+
+bool ND02_ExternalCurrencyStrengthServer(const string currency,
+                                         const datetime eventServer,
+                                         double &strength)
+{
+   strength=0.0;
+   if(!ND02_IsCurrency(currency))
+      return false;
+
+   double sum=0.0;
+   int n=0;
+
+   for(int i=0;i<ND02_CUR_COUNT;i++)
+   {
+      string other=ND02_Currencies[i];
+      if(other==currency)
+         continue;
+
+      double z=0.0;
+      if(!ND02_GetOrientedZServer(currency,other,eventServer,z))
+         return false;
+
+      sum+=z;
+      n++;
+   }
+
+   if(n!=7)
+      return false;
+
+   strength=sum/n;
+   return MathIsValidNumber(strength);
+}
+
 #endif
