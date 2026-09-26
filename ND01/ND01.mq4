@@ -12,7 +12,7 @@ enum ND01_TRADE_MODE
 };
 
 input ND01_TRADE_MODE InpMode                  = ND_MODE_SIGNAL_ONLY;
-input string          InpNewsFile              = "NEWS_LIVE.csv";
+input string          InpNewsFile              = "NEWS.csv";
 input double          InpDislocationSigma      = 2.0;     // frozen NEWS03/05 threshold
 input int             InpDecisionDelayMinutes  = 30;      // frozen
 input int             InpDecisionWindowMinutes = 10;      // don't enter stale signals
@@ -23,7 +23,7 @@ input int             InpMagic                 = 26092601;
 input bool            InpAllowRealAccount      = false;
 input bool            InpManualSmoke           = false;   // evaluates "news 30m ago" once
 input string          InpManualCurrency        = "USD";
-input string          InpLogFile               = "NEWS_DISLOCATION_TRADER_01.csv";
+input string          InpLogFile               = "ND01.csv";
 
 bool g_manualDone=false;
 datetime g_lastMissingFileNotice=0;
@@ -425,7 +425,7 @@ int OnInit()
    int found=ND01_InitBrokerSymbols();
 
    Print("============================================================");
-   Print("NEWS DISLOCATION TRADER 01");
+   Print("ND01");
    Print("MODE=",ND01_ModeText()," | mapped FX pairs=",found,"/28");
    Print("Frozen signal: +30m, target excluded, |D|>=2 sigma");
    Print("Hold minutes=",InpHoldMinutes," | magic=",InpMagic);
@@ -444,7 +444,7 @@ int OnInit()
    EventSetTimer(10);
 
    Comment(
-      "NEWS DISLOCATION TRADER 01\n",
+      "ND01\n",
       "Mode: ",ND01_ModeText(),"\n",
       "FX basket: ",found,"/28\n",
       "Signal: High Impact -> +30m -> |D| >= ",
