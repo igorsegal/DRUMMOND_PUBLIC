@@ -1,0 +1,26 @@
+name: ND01 MT4 STATIC CHECK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'NEWS_DISLOCATION_TRADER_01/**'
+      - 'scripts/ND01_STATIC.py'
+      - '.github/workflows/nd01_mt4_static.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Run ND01 contract checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/ND01_STATIC.py
