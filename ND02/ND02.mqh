@@ -247,4 +247,88 @@ bool ND02_TargetDislocation(const int targetIndex,
            MathIsValidNumber(dislocation));
 }
 
+
+bool ND02_SymbolZ30(const string sym,
+                    const datetime eventServer,
+                    double &z30)
+{
+   z30=0.0;
+   datetime aligned=ND02_AlignUpM5(eventServer);
+
+   if(iBars(sym,PERIOD_M5)<ND02_VOL_BARS+20)
+      return false;
+
+   int s0=iBarShift(sym,PERIOD_M5,aligned,true);
+   int s30=iBarShift(sym,PERIOD_M5,aligned+1800,true);
+   if(s0<0 || s30<0)
+      return false;
+   if(s0+ND02_VOL_BARS+1>=iBars(sym,PERIOD_M5))
+      return false;
+
+   double o0=iOpen(sym,PERIOD_M5,s0);
+   double o30=iOpen(sym,PERIOD_M5,s30);
+   if(o0<=0.0 || o30<=0.0)
+      return false;
+
+   double sum=0.0, sum2=0.0;
+   int n=0;
+   for(int k=1;k<=ND02_VOL_BARS;k++)
+   {
+      double onewer=iOpen(sym,PERIOD_M5,s0+k);
+      double oolder=iOpen(sym,PERIOD_M5,s0+k+1);
+      if(onewer<=0.0 || oolder<=0.0)
+         return false;
+
+      double r=MathLog(onewer/oolder);
+      sum+=r;
+      sum2+=r*r;
+      n++;
+   }
+
+   if(n<2)
+      return false;
+
+   double variance=(sum2-sum*sum/n)/(n-1);
+   if(variance<=0.0)
+      return false;
+
+   double sd=MathSqrt(variance);
+   double r30=MathLog(o30/o0);
+   z30=r30/(sd*MathSqrt(6.0));
+
+   return MathIsValidNumber(z30);
+}
+
+bool ND02_ExternalCurrencyStrength(const string currency,
+                                   double &z[],
+                                   double &strength)
+{
+   strength=0.0;
+   if(!ND02_IsCurrency(currency))
+      return false;
+
+   double sum=0.0;
+   int n=0;
+
+   for(int i=0;i<ND02_CUR_COUNT;i++)
+   {
+      string other=ND02_Currencies[i];
+      if(other==currency)
+         continue;
+
+      double v=0.0;
+      if(!ND02_GetOrientedZ(currency,other,z,v))
+         return false;
+
+      sum+=v;
+      n++;
+   }
+
+   if(n!=7)
+      return false;
+
+   strength=sum/n;
+   return MathIsValidNumber(strength);
+}
+
 #endif
