@@ -7,6 +7,10 @@ on:
         description: 2026 month (jan..sep)
         required: true
         default: jan
+  push:
+    paths:
+      - '.github/workflows/n26.yml'
+      - 'scripts/N26.py'
 
 permissions:
   contents: read
@@ -29,11 +33,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
+          MONTH="${{ inputs.month || 'jan' }}"
+          echo "N26 month=$MONTH"
           python scripts/N26.py \
             --year 2026 \
-            --month "${{ inputs.month }}" \
+            --month "$MONTH" \
             --through 2026-09-26 \
-            --out "out/N26_${{ inputs.month }}.csv"
+            --out "out/N26_$MONTH.csv"
 
       - name: Contract
         shell: bash
