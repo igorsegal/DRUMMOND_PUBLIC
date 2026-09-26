@@ -27,6 +27,11 @@ string ND02_CanonicalPairs[ND02_PAIR_COUNT] =
 
 string ND02_BrokerPairs[ND02_PAIR_COUNT];
 
+string ND02_LastBasketFailSymbol="";
+string ND02_LastBasketFailReason="";
+datetime ND02_LastBasketFailRequested=0;
+datetime ND02_LastBasketFailActual=0;
+
 int ND02_FindCanonicalPairIndex(const string canonical)
 {
    for(int i=0;i<ND02_PAIR_COUNT;i++)
@@ -100,39 +105,91 @@ bool ND02_PairZ30(const int pairIndex,
                   double &z30)
 {
    z30=0.0;
+   ND02_LastBasketFailSymbol="";
+   ND02_LastBasketFailReason="";
+   ND02_LastBasketFailRequested=0;
+   ND02_LastBasketFailActual=0;
+
    if(pairIndex<0 || pairIndex>=ND02_PAIR_COUNT)
+   {
+      ND02_LastBasketFailReason="BAD_PAIR_INDEX";
       return false;
+   }
 
    string sym=ND02_BrokerPairs[pairIndex];
    if(sym=="")
+   {
+      ND02_LastBasketFailReason="NO_BROKER_SYMBOL";
       return false;
+   }
 
-   if(iBars(sym,PERIOD_M5)<ND02_VOL_BARS+20)
+   int bars=iBars(sym,PERIOD_M5);
+   if(bars<ND02_VOL_BARS+20)
+   {
+      ND02_LastBasketFailSymbol=sym;
+      ND02_LastBasketFailReason="SHORT_M5_HISTORY";
       return false;
+   }
 
-   int s0=iBarShift(sym,PERIOD_M5,alignedEventServerTime,true);
-   int s30=iBarShift(sym,PERIOD_M5,alignedEventServerTime+1800,true);
+   // MT4 histories can omit an individual M5 timestamp when there was no tick.
+   // Use nearest bar but allow at most one M5 interval of displacement.
+   int s0=iBarShift(sym,PERIOD_M5,alignedEventServerTime,false);
+   int s30=iBarShift(sym,PERIOD_M5,alignedEventServerTime+1800,false);
    if(s0<0 || s30<0)
+   {
+      ND02_LastBasketFailSymbol=sym;
+      ND02_LastBasketFailReason="IBARSHIFT_FAIL";
       return false;
-   if(s0+ND02_VOL_BARS+1>=iBars(sym,PERIOD_M5))
+   }
+
+   datetime t0=iTime(sym,PERIOD_M5,s0);
+   datetime t30=iTime(sym,PERIOD_M5,s30);
+   if(MathAbs((double)(t0-alignedEventServerTime))>300.0)
+   {
+      ND02_LastBasketFailSymbol=sym;
+      ND02_LastBasketFailReason="EVENT_BAR_GAP_GT_M5";
+      ND02_LastBasketFailRequested=alignedEventServerTime;
+      ND02_LastBasketFailActual=t0;
       return false;
+   }
+   if(MathAbs((double)(t30-(alignedEventServerTime+1800)))>300.0)
+   {
+      ND02_LastBasketFailSymbol=sym;
+      ND02_LastBasketFailReason="DECISION_BAR_GAP_GT_M5";
+      ND02_LastBasketFailRequested=alignedEventServerTime+1800;
+      ND02_LastBasketFailActual=t30;
+      return false;
+   }
+
+   if(s0+ND02_VOL_BARS+1>=bars)
+   {
+      ND02_LastBasketFailSymbol=sym;
+      ND02_LastBasketFailReason="PRIOR_24H_NOT_AVAILABLE";
+      return false;
+   }
 
    double o0=iOpen(sym,PERIOD_M5,s0);
    double o30=iOpen(sym,PERIOD_M5,s30);
    if(o0<=0.0 || o30<=0.0)
+   {
+      ND02_LastBasketFailSymbol=sym;
+      ND02_LastBasketFailReason="BAD_EVENT_OPEN";
       return false;
+   }
 
    double sum=0.0, sum2=0.0;
    int n=0;
 
-   // Strictly prior volatility: do NOT include event-bar return.
-   // Newer/older open ratio for 288 completed M5 returns.
    for(int k=1;k<=ND02_VOL_BARS;k++)
    {
       double onewer=iOpen(sym,PERIOD_M5,s0+k);
       double oolder=iOpen(sym,PERIOD_M5,s0+k+1);
       if(onewer<=0.0 || oolder<=0.0)
+      {
+         ND02_LastBasketFailSymbol=sym;
+         ND02_LastBasketFailReason="BAD_PRIOR_OPEN";
          return false;
+      }
 
       double r=MathLog(onewer/oolder);
       sum+=r;
@@ -141,17 +198,32 @@ bool ND02_PairZ30(const int pairIndex,
    }
 
    if(n<2)
+   {
+      ND02_LastBasketFailSymbol=sym;
+      ND02_LastBasketFailReason="VOL_N_LT_2";
       return false;
+   }
 
    double variance=(sum2-sum*sum/n)/(n-1);
    if(variance<=0.0)
+   {
+      ND02_LastBasketFailSymbol=sym;
+      ND02_LastBasketFailReason="VOL_ZERO";
       return false;
+   }
 
    double sd=MathSqrt(variance);
    double r30=MathLog(o30/o0);
    z30=r30/(sd*MathSqrt(6.0));
 
-   return MathIsValidNumber(z30);
+   if(!MathIsValidNumber(z30))
+   {
+      ND02_LastBasketFailSymbol=sym;
+      ND02_LastBasketFailReason="Z_INVALID";
+      return false;
+   }
+
+   return true;
 }
 
 bool ND02_BuildZVectorServer(const datetime eventServer,
