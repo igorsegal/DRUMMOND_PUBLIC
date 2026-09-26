@@ -1,0 +1,52 @@
+name: NEWS05 HISTORICAL BRIDGE PROBE
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/news05_histprobe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install selenium
+        run: pip install selenium==4.13.0
+      - name: Probe historical ranges with browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from selenium import webdriver
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.support.ui import WebDriverWait
+          from selenium.webdriver.support import expected_conditions as EC
+          
+          opt=webdriver.ChromeOptions()
+          opt.add_argument('--headless=new')
+          opt.add_argument('--no-sandbox')
+          opt.add_argument('--disable-dev-shm-usage')
+          opt.add_argument('--disable-gpu')
+          opt.add_argument('--window-size=1920,1080')
+          opt.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36')
+          d=webdriver.Chrome(options=opt)
+          try:
+              for rng in ['apr8.2025-apr14.2025','jan5.2026-jan11.2026']:
+                  url='https://www.forexfactory.com/calendar?range='+rng
+                  d.get(url)
+                  WebDriverWait(d,20).until(EC.presence_of_element_located((By.CLASS_NAME,'calendar__table')))
+                  rows=d.find_elements(By.CSS_SELECTOR,'tr.calendar__row')
+                  high=d.find_elements(By.CSS_SELECTOR,'.calendar__impact--high')
+                  print('RANGE',rng,'TITLE',d.title,'ROWS',len(rows),'HIGH_ICONS',len(high),'URL',d.current_url)
+                  assert len(rows)>20
+                  assert len(high)>0
+          finally:
+              d.quit()
+          PY
