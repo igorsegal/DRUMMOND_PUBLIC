@@ -320,38 +320,35 @@ void ND02_ProcessNews()
          continue;
       }
 
-      double z[];
-      ArrayResize(z,ND02_PAIR_COUNT);
-
-      if(!ND02_BuildZVectorServer(gServer[gNext],z))
-      {
-         if(gLastBasketFailNews!=gNext || TimeCurrent()-gLastBasketFailPrint>=60)
-         {
-            Print("ND02 BASKET WAIT event=",
-                  TimeToString(gServer[gNext],TIME_DATE|TIME_MINUTES),
-                  " target=",gTargetCanonical,
-                  " fail_symbol=",ND02_LastBasketFailSymbol,
-                  " reason=",ND02_LastBasketFailReason,
-                  " requested=",TimeToString(ND02_LastBasketFailRequested,TIME_DATE|TIME_MINUTES),
-                  " actual=",TimeToString(ND02_LastBasketFailActual,TIME_DATE|TIME_MINUTES));
-            gLastBasketFailNews=gNext;
-            gLastBasketFailPrint=TimeCurrent();
-         }
-         return; // retry until decision window expires
-      }
-
       double targetZ=0.0,externalGap=0.0,d=0.0;
       bool calcOK=false;
 
       if(gTargetMode==1)
       {
+         double z[];
+         ArrayResize(z,ND02_PAIR_COUNT);
+
+         if(!ND02_BuildZVectorServer(gServer[gNext],z))
+         {
+            if(gLastBasketFailNews!=gNext)
+            {
+               Print("ND02 BASKET WAIT event=",
+                     TimeToString(gServer[gNext],TIME_DATE|TIME_MINUTES),
+                     " target=",gTargetCanonical,
+                     " fail_symbol=",ND02_LastBasketFailSymbol,
+                     " reason=",ND02_LastBasketFailReason);
+               gLastBasketFailNews=gNext;
+            }
+            return;
+         }
+
          calcOK=ND02_TargetDislocation(gTarget,z,targetZ,externalGap,d);
       }
       else if(gTargetMode==2)
       {
          double currencyStrength=0.0;
          bool a=ND02_SymbolZ30(Symbol(),gServer[gNext],targetZ);
-         bool b=ND02_ExternalCurrencyStrength(gNewsCurrency,z,currencyStrength);
+         bool b=ND02_ExternalCurrencyStrengthServer(gNewsCurrency,gServer[gNext],currencyStrength);
 
          if(a && b)
          {
@@ -360,6 +357,20 @@ void ND02_ProcessNews()
             externalGap=(gKnownCurrencyIsBase ? currencyStrength : -currencyStrength);
             d=externalGap-targetZ;
             calcOK=true;
+         }
+         else
+         {
+            if(gLastBasketFailNews!=gNext)
+            {
+               Print("ND02 ONE_SIDED WAIT event=",
+                     TimeToString(gServer[gNext],TIME_DATE|TIME_MINUTES),
+                     " target=",gTargetCanonical,
+                     " currency=",gNewsCurrency,
+                     " fail_symbol=",ND02_LastBasketFailSymbol,
+                     " reason=",ND02_LastBasketFailReason);
+               gLastBasketFailNews=gNext;
+            }
+            return;
          }
       }
 
