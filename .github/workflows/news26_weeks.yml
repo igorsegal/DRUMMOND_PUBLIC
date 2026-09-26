@@ -1,0 +1,129 @@
+name: NEWS26 WEEKLY COLLECT
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/news26_weeks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  week:
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        start: ['2025-12-28', '2026-01-04', '2026-01-11', '2026-01-18', '2026-01-25', '2026-02-01', '2026-02-08', '2026-02-15', '2026-02-22', '2026-03-01', '2026-03-08', '2026-03-15', '2026-03-22', '2026-03-29', '2026-04-05', '2026-04-12', '2026-04-19', '2026-04-26', '2026-05-03', '2026-05-10', '2026-05-17', '2026-05-24', '2026-05-31', '2026-06-07', '2026-06-14', '2026-06-21', '2026-06-28', '2026-07-05', '2026-07-12', '2026-07-19', '2026-07-26', '2026-08-02', '2026-08-09', '2026-08-16', '2026-08-23', '2026-08-30', '2026-09-06', '2026-09-13', '2026-09-20']
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+      - name: Collect one week in UTC
+        shell: bash
+        env:
+          START: ${{ matrix.start }}
+        run: |
+          set -euo pipefail
+          END=$(date -u -d "$START +6 days" +%F)
+          echo "START=$START END=$END"
+          ok=0
+          for attempt in 1 2 3; do
+            rm -f raw.csv
+            if xvfb-run -a go run github.com/Nosvemos/forexfactory-go/cmd/forexfactory-go@v0.1.0 download \
+              -s "$START" -e "$END" -f csv -o raw.csv -t UTC -c 1 -r 1; then
+              if [ -s raw.csv ]; then ok=1; break; fi
+            fi
+            echo "attempt $attempt failed; sleeping"
+            sleep $((attempt*15))
+          done
+          test "$ok" = 1
+          head -3 raw.csv || true
+      - name: Normalize week
+        shell: bash
+        env:
+          START: ${{ matrix.start }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,datetime,os,pathlib
+          CUR={'AUD','CAD','CHF','EUR','GBP','JPY','NZD','USD'}
+          with open('raw.csv',encoding='utf-8-sig',newline='') as f:
+              rd=csv.DictReader(f); rows=list(rd); fields=rd.fieldnames or []
+          print('FIELDS',fields,'ROWS',len(rows))
+          def pick(r,*names):
+              for n in names:
+                  if n in r and r[n] not in (None,''): return r[n]
+              return ''
+          out=[]
+          for r in rows:
+              cur=pick(r,'currency','Currency','country','Country').strip().upper()
+              imp=pick(r,'impact','Impact','impact_level','ImpactLevel').strip().lower()
+              if cur not in CUR or imp!='high': continue
+              title=pick(r,'title','Title','event','Event').strip()
+              ds=pick(r,'date','Date','datetime','DateTime','timestamp','Timestamp').strip()
+              if not ds or not title: continue
+              try:
+                  dt=datetime.datetime.fromisoformat(ds.replace('Z','+00:00'))
+                  if dt.tzinfo is None: dt=dt.replace(tzinfo=datetime.timezone.utc)
+                  dt=dt.astimezone(datetime.timezone.utc)
+              except Exception as e:
+                  print('BAD_DATE',ds,e); continue
+              out.append({'UTC_TIME':dt.strftime('%Y-%m-%dT%H:%M:%SZ'),'CURRENCY':cur,'IMPACT':'HIGH','EVENT':title})
+          uniq={(r['UTC_TIME'],r['CURRENCY'],r['EVENT']):r for r in out}
+          out=sorted(uniq.values(),key=lambda r:(r['UTC_TIME'],r['CURRENCY'],r['EVENT']))
+          tag=os.environ['START'].replace('-','')
+          p=pathlib.Path(f'NEWS26_{tag}.csv')
+          with p.open('w',encoding='utf-8',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=['UTC_TIME','CURRENCY','IMPACT','EVENT'],delimiter=';')
+              w.writeheader();w.writerows(out)
+          print('HIGH',len(out), 'FILE',p)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: news26-${{ matrix.start }}
+          path: NEWS26_*.csv
+          if-no-files-found: error
+
+  merge:
+    needs: week
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: news26-*
+          path: parts
+          merge-multiple: true
+      - name: Merge NEWS26
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,glob,datetime,pathlib
+          files=sorted(glob.glob('parts/NEWS26_*.csv'))
+          print('WEEK_FILES',len(files))
+          if len(files)<39: raise SystemExit(f'need 39 week files, got {len(files)}')
+          rows={}
+          for fn in files:
+              with open(fn,encoding='utf-8-sig',newline='') as f:
+                  for r in csv.DictReader(f,delimiter=';'):
+                      if not ('2026-01-01T00:00:00Z' <= r['UTC_TIME'] <= '2026-09-26T23:59:59Z'): continue
+                      rows[(r['UTC_TIME'],r['CURRENCY'],r['EVENT'])]=r
+          rr=sorted(rows.values(),key=lambda r:(r['UTC_TIME'],r['CURRENCY'],r['EVENT']))
+          if len(rr)<100: raise SystemExit(f'too few events {len(rr)}')
+          p=pathlib.Path('NEWS26.csv')
+          with p.open('w',encoding='utf-8',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=['UTC_TIME','CURRENCY','IMPACT','EVENT'],delimiter=';')
+              w.writeheader();w.writerows(rr)
+          print('NEWS26_EVENTS',len(rr),'FIRST',rr[0]['UTC_TIME'],'LAST',rr[-1]['UTC_TIME'])
+          for c in sorted(set(r['CURRENCY'] for r in rr)): print(c,sum(r['CURRENCY']==c for r in rr))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NEWS26
+          path: NEWS26.csv
+          if-no-files-found: error
