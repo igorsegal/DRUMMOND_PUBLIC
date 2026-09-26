@@ -5,7 +5,7 @@ import re, sys
 root=Path("ND01")
 ea=(root/"ND01.mq4").read_text(encoding="utf-8")
 core=(root/"ND01.mqh").read_text(encoding="utf-8")
-readme=(root/"README_RU.txt").read_text(encoding="utf-8")
+readme=(root/"README.txt").read_text(encoding="utf-8")
 
 pairs=[
 "AUDCAD","AUDCHF","AUDJPY","AUDNZD","AUDUSD",
