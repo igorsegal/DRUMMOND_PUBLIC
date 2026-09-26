@@ -1,0 +1,80 @@
+name: NEWS2026 COLLECT
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/news2026_collect.yml'
+      - 'scripts/NEWS2026_COLLECT.py'
+
+permissions:
+  contents: read
+
+jobs:
+  month:
+    strategy:
+      fail-fast: false
+      max-parallel: 9
+      matrix:
+        month: [jan, feb, mar, apr, may, jun, jul, aug, sep]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install selenium
+        run: pip install selenium==4.13.0
+      - name: Collect month
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python scripts/NEWS2026_COLLECT.py --month '${{ matrix.month }}' --year 2026 --out 'out/NEWS2026_${{ matrix.month }}.csv'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: news2026-${{ matrix.month }}
+          path: out/NEWS2026_${{ matrix.month }}.csv
+          if-no-files-found: error
+
+  merge:
+    needs: month
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: news2026-*
+          path: parts
+          merge-multiple: true
+      - name: Merge calendar
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,glob,pathlib,sys
+          fs=sorted(glob.glob('parts/NEWS2026_*.csv'))
+          print('MONTH_FILES',len(fs),fs)
+          if len(fs)<9:
+              raise SystemExit(f'need 9 month files, got {len(fs)}')
+          rows={}
+          for fn in fs:
+              with open(fn,encoding='utf-8-sig',newline='') as f:
+                  for r in csv.DictReader(f,delimiter=';'):
+                      k=(r['UTC_TIME'],r['CURRENCY'],r['EVENT'])
+                      rows[k]=r
+          rr=sorted(rows.values(),key=lambda r:(r['UTC_TIME'],r['CURRENCY'],r['EVENT']))
+          out=pathlib.Path('NEWS2026.csv')
+          with out.open('w',encoding='utf-8',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=['UTC_TIME','CURRENCY','IMPACT','EVENT','SOURCE_EVENT_ID'],delimiter=';')
+              w.writeheader();w.writerows(rr)
+          print('NEWS2026 HIGH EVENTS',len(rr),'FIRST',rr[0]['UTC_TIME'],'LAST',rr[-1]['UTC_TIME'])
+          for c in sorted(set(r['CURRENCY'] for r in rr)):
+              print(c,sum(r['CURRENCY']==c for r in rr))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NEWS2026
+          path: NEWS2026.csv
+          if-no-files-found: error
