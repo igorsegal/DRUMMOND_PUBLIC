@@ -26,7 +26,12 @@ string   gName[];
 int      gNewsN=0;
 int      gNext=0;
 int      gTarget=-1;
+int      gTargetMode=0; // 1=full FX pair, 2=one-sided external currency target
 string   gTargetCanonical="";
+string   gBaseCode="";
+string   gQuoteCode="";
+string   gNewsCurrency="";
+bool     gKnownCurrencyIsBase=false;
 datetime gLastExitCheck=0;
 
 string ND02_Upper(string s)
@@ -72,23 +77,52 @@ datetime ND02_UtcToServer(datetime utc)
    return utc+ND02_UtcOffsetHours(utc)*3600;
 }
 
-int ND02_TargetIndex()
+bool ND02_ParseTarget()
 {
    string s=Symbol();
+
    for(int i=0;i<ND02_PAIR_COUNT;i++)
-      if(s==ND02_CanonicalPairs[i])
-         return i;
-   for(int j=0;j<ND02_PAIR_COUNT;j++)
-      if(StringFind(s,ND02_CanonicalPairs[j],0)>=0)
-         return j;
-   return -1;
+   {
+      if(s==ND02_CanonicalPairs[i] || StringFind(s,ND02_CanonicalPairs[i],0)>=0)
+      {
+         gTarget=i;
+         gTargetMode=1;
+         gTargetCanonical=ND02_CanonicalPairs[i];
+         gBaseCode=StringSubstr(gTargetCanonical,0,3);
+         gQuoteCode=StringSubstr(gTargetCanonical,3,3);
+         return true;
+      }
+   }
+
+   if(StringLen(s)<6)
+      return false;
+
+   gBaseCode=StringSubstr(s,0,3);
+   gQuoteCode=StringSubstr(s,3,3);
+
+   bool baseKnown=ND02_IsCurrency(gBaseCode);
+   bool quoteKnown=ND02_IsCurrency(gQuoteCode);
+
+   if(baseKnown==quoteKnown)
+      return false;
+
+   gTarget=-1;
+   gTargetMode=2;
+   gTargetCanonical=gBaseCode+gQuoteCode;
+   gKnownCurrencyIsBase=baseKnown;
+   gNewsCurrency=(baseKnown ? gBaseCode : gQuoteCode);
+   return true;
 }
 
 bool ND02_TargetContainsCurrency(string cur)
 {
-   if(gTarget<0) return false;
-   string p=ND02_CanonicalPairs[gTarget];
-   return (StringSubstr(p,0,3)==cur || StringSubstr(p,3,3)==cur);
+   if(gTargetMode==1)
+      return (gBaseCode==cur || gQuoteCode==cur);
+
+   if(gTargetMode==2)
+      return (gNewsCurrency==cur);
+
+   return false;
 }
 
 bool ND02_LoadNews()
@@ -296,7 +330,29 @@ void ND02_ProcessNews()
       }
 
       double targetZ=0.0,externalGap=0.0,d=0.0;
-      if(!ND02_TargetDislocation(gTarget,z,targetZ,externalGap,d))
+      bool calcOK=false;
+
+      if(gTargetMode==1)
+      {
+         calcOK=ND02_TargetDislocation(gTarget,z,targetZ,externalGap,d);
+      }
+      else if(gTargetMode==2)
+      {
+         double currencyStrength=0.0;
+         bool a=ND02_SymbolZ30(Symbol(),gServer[gNext],targetZ);
+         bool b=ND02_ExternalCurrencyStrength(gNewsCurrency,z,currencyStrength);
+
+         if(a && b)
+         {
+            // Example XAUUSD: positive USD strength implies negative external
+            // pressure for XAUUSD, because USD is the quote currency.
+            externalGap=(gKnownCurrencyIsBase ? currencyStrength : -currencyStrength);
+            d=externalGap-targetZ;
+            calcOK=true;
+         }
+      }
+
+      if(!calcOK)
       {
          ND02_Log(gNext,targetZ,externalGap,d,"CALC_FAIL",-1,0);
          gNext++;
@@ -344,16 +400,21 @@ int OnInit()
       return INIT_FAILED;
    }
 
-   gTarget=ND02_TargetIndex();
-   if(gTarget<0)
+   if(!ND02_ParseTarget())
    {
-      Print("ND02 INIT FAILED: test symbol is not one of canonical 28 FX crosses: ",Symbol());
+      Print("ND02 INIT FAILED: unsupported target symbol: ",Symbol(),
+            ". Use a canonical FX pair or a 6-char symbol with exactly one of AUD/CAD/CHF/EUR/GBP/JPY/NZD/USD.");
       return INIT_FAILED;
    }
-   gTargetCanonical=ND02_CanonicalPairs[gTarget];
 
    int found=ND02_InitBrokerSymbols();
-   Print("ND02 map=",found,"/28 target=",gTargetCanonical," broker=",Symbol());
+   Print("ND02 map=",found,"/28 target=",gTargetCanonical,
+         " broker=",Symbol()," mode=",(gTargetMode==1 ? "FX_FULL" : "ONE_SIDED"));
+
+   if(gTargetMode==2)
+      Print("ND02 EXPERIMENTAL ONE-SIDED TARGET: currency=",gNewsCurrency,
+            " known_is_base=",gKnownCurrencyIsBase,
+            " (e.g. XAUUSD uses external USD strength).");
 
    if(found<ND02_PAIR_COUNT)
    {
@@ -374,6 +435,7 @@ int OnInit()
    Print("==================================================");
    Print("ND02 STRATEGY TESTER TRADER");
    Print("TARGET=",gTargetCanonical,
+         " MODE=",(gTargetMode==1 ? "FX_FULL" : "ONE_SIDED"),
          " NEWS=",gNewsN,
          " TRADE=",InpTrade,
          " HOLD=",InpHoldMinutes,
