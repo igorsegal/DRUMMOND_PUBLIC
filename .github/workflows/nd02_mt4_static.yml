@@ -1,0 +1,23 @@
+name: ND02 MT4 STATIC CHECK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ND02/**'
+      - 'scripts/ND02_STATIC.py'
+      - '.github/workflows/nd02_mt4_static.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Run ND02 checks
+        run: python scripts/ND02_STATIC.py
