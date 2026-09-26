@@ -55,19 +55,31 @@ def driver():
     opt.add_argument("--window-size=1920,2400")
     opt.add_argument("--lang=en-US")
     opt.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36")
+    opt.page_load_strategy="eager"
     d=webdriver.Chrome(options=opt)
     d.execute_cdp_cmd("Emulation.setTimezoneOverride",{"timezoneId":"UTC"})
-    d.set_page_load_timeout(50)
+    d.set_page_load_timeout(35)
     return d
 
-def scrape_range(d, start:date, end:date):
+def scrape_range(start:date, end:date):
     url=f"https://www.forexfactory.com/calendar?range={ff_date(start)}-{ff_date(end)}"
     last_err=None
 
-    for attempt in range(1,4):
+    for attempt in range(1,3):
+        d=driver()
         try:
-            d.get(url)
-            WebDriverWait(d,35).until(
+            try:
+                d.get(url)
+            except Exception as load_err:
+                # Chrome may time out on ads/secondary resources after the
+                # calendar HTML is already present. Stop loading and inspect.
+                print("PAGE_LOAD_WARN",start,end,type(load_err).__name__)
+                try:
+                    d.execute_script("window.stop();")
+                except Exception:
+                    pass
+
+            WebDriverWait(d,20).until(
                 EC.presence_of_element_located((By.CLASS_NAME,"calendar__table"))
             )
             time.sleep(1.0)
@@ -152,8 +164,10 @@ def scrape_range(d, start:date, end:date):
         except Exception as e:
             last_err=e
             print("RANGE_FAIL",start,end,"attempt",attempt,type(e).__name__,str(e)[:300])
-            if attempt<3:
-                time.sleep(15*attempt)
+            if attempt<2:
+                time.sleep(20)
+        finally:
+            d.quit()
 
     raise RuntimeError(f"range {start}..{end} failed: {last_err}")
 
@@ -183,21 +197,17 @@ def main():
     if m0 is None:
         raise SystemExit("month is after --through")
 
-    d=driver()
     all_rows=[]
-    try:
-        s=m0
-        part=0
-        while s<=m1:
-            e=min(s+timedelta(days=6),m1)
-            part+=1
-            rows=scrape_range(d,s,e)
-            all_rows.extend(rows)
-            s=e+timedelta(days=1)
-            if s<=m1:
-                time.sleep(8)
-    finally:
-        d.quit()
+    s=m0
+    part=0
+    while s<=m1:
+        e=min(s+timedelta(days=6),m1)
+        part+=1
+        rows=scrape_range(s,e)
+        all_rows.extend(rows)
+        s=e+timedelta(days=1)
+        if s<=m1:
+            time.sleep(15)
 
     uniq={}
     for r in all_rows:
