@@ -1,0 +1,141 @@
+name: NEWS05 UNTOUCHED VALIDATION
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_tag:
+        description: Canonical market dataset release tag
+        required: true
+        default: dataset03-drummond_canonical_8e9a1d784e3893d9
+  push:
+    paths:
+      - '.github/workflows/news05_validation.yml'
+      - 'scripts/NEWS05.py'
+      - 'scripts/NEWS03.py'
+      - 'scripts/NEWS02.py'
+      - 'scripts/NEWS01.py'
+
+permissions:
+  contents: read
+
+jobs:
+  news05:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Syntax contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/NEWS05.py scripts/NEWS03.py scripts/NEWS02.py scripts/NEWS01.py scripts/drummond_replay01.py
+
+      - name: Download pinned untouched calendar bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .news05
+          BASE='https://raw.githubusercontent.com/joor0x/forex-factory-agent-feed/e30c2828efbb4c2d88c2ece23799bbf8872314fd/news/monthly'
+          for M in 2026-06 2026-07 2026-08 2026-09; do
+            curl -L --fail --retry 5 --retry-delay 2 "$BASE/$M.csv" -o ".news05/$M.csv"
+            echo "$M bytes=$(wc -c < ".news05/$M.csv")"
+          done
+
+      - name: Validate calendar bridge contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,glob,datetime
+          n=0; hi=0; first=None; last=None
+          for fn in sorted(glob.glob('.news05/*.csv')):
+              with open(fn,encoding='utf-8-sig',newline='') as f:
+                  rows=list(csv.DictReader(f))
+              assert rows, fn
+              for r in rows:
+                  assert {'datetime_utc','currency','impact_level','event'} <= set(r)
+                  if r['impact_level'].lower()=='high' and r['datetime_utc']:
+                      hi+=1
+                      dt=datetime.datetime.fromisoformat(r['datetime_utc'].replace('Z','+00:00'))
+                      first=dt if first is None or dt<first else first
+                      last=dt if last is None or dt>last else last
+                  n+=1
+          assert hi>50, hi
+          assert first.date() >= datetime.date(2026,6,1)
+          print('bridge rows',n,'high',hi,'first',first,'last',last)
+          PY
+
+      - name: Download canonical market manifest and shards
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: ${{ inputs.dataset_tag || 'dataset03-drummond_canonical_8e9a1d784e3893d9' }}
+        run: |
+          set -euo pipefail
+          mkdir -p .dataset
+          gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern DATASET_MANIFEST.csv
+          for n in 001 002 003 004 005 006; do
+            gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern "shard_${n}.zip"
+          done
+
+      - name: Extract and verify 28 M5 FX pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,hashlib,pathlib,zipfile
+          pairs=set('AUDCAD AUDCHF AUDJPY AUDNZD AUDUSD CADCHF CADJPY CHFJPY EURAUD EURCAD EURCHF EURGBP EURJPY EURNZD EURUSD GBPAUD GBPCAD GBPCHF GBPJPY GBPNZD GBPUSD NZDCAD NZDCHF NZDJPY NZDUSD USDCAD USDCHF USDJPY'.split())
+          with open('.dataset/DATASET_MANIFEST.csv',newline='',encoding='utf-8-sig') as f:
+              rows=[r for r in csv.DictReader(f) if r['symbol'] in pairs and r['tf']=='M5']
+          assert len(rows)==28, len(rows)
+          out=pathlib.Path('.fx');out.mkdir(exist_ok=True)
+          by={}
+          for r in rows: by.setdefault(r['shard'],[]).append(r)
+          for shard,rr in sorted(by.items()):
+              with zipfile.ZipFile(pathlib.Path('.dataset')/shard) as z:
+                  names=set(z.namelist())
+                  for r in rr:
+                      rel=r['relative_path'].replace('\\','/')
+                      if rel not in names: raise SystemExit('missing '+rel)
+                      z.extract(rel,out)
+                      p=out/rel
+                      h=hashlib.sha256(p.read_bytes()).hexdigest()
+                      if h.lower()!=r['sha256'].lower(): raise SystemExit('SHA mismatch '+rel)
+                      print('PASS',rel,r['bar_count'])
+          PY
+
+      - name: Run NEWS05 untouched validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/NEWS05.py --root .fx --calendar .news05/2026-06.csv .news05/2026-07.csv .news05/2026-08.csv .news05/2026-09.csv --out results/latest/news05
+          cat results/latest/news05/NEWS05.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,pathlib
+          s=json.loads(pathlib.Path('results/latest/news05/NEWS05.json').read_text())
+          assert s['status']=='PASS'
+          c=s['contract']
+          assert c['untouched_time_validation'] is True
+          assert c['signal_frozen_from_news03_news04'] is True
+          assert c['actual_forecast_previous_used'] is False
+          assert c['target_pair_excluded_from_external_strength'] is True
+          assert c['primary_threshold_abs_dislocation_z']==2.0
+          assert c['parameter_optimization'] is False
+          assert c['event_type_reselection'] is False
+          print('NEWS05 gate PASS')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: news05-untouched-validation
+          path: results/latest/news05/
+          if-no-files-found: error
