@@ -33,6 +33,8 @@ string   gQuoteCode="";
 string   gNewsCurrency="";
 bool     gKnownCurrencyIsBase=false;
 datetime gLastExitCheck=0;
+datetime gLastBasketFailPrint=0;
+int      gLastBasketFailNews=-1;
 
 string ND02_Upper(string s)
 {
@@ -306,7 +308,7 @@ void ND02_ProcessNews()
       if(now<ready)
          break;
 
-      if(now>ready+InpDecisionWindowMinutes*60)
+      if(now>=ready+InpDecisionWindowMinutes*60)
       {
          gNext++;
          continue;
@@ -323,9 +325,18 @@ void ND02_ProcessNews()
 
       if(!ND02_BuildZVectorServer(gServer[gNext],z))
       {
-         Print("ND02: basket not ready at ",
-               TimeToString(gServer[gNext],TIME_DATE|TIME_MINUTES),
-               " target=",gTargetCanonical);
+         if(gLastBasketFailNews!=gNext || TimeCurrent()-gLastBasketFailPrint>=60)
+         {
+            Print("ND02 BASKET WAIT event=",
+                  TimeToString(gServer[gNext],TIME_DATE|TIME_MINUTES),
+                  " target=",gTargetCanonical,
+                  " fail_symbol=",ND02_LastBasketFailSymbol,
+                  " reason=",ND02_LastBasketFailReason,
+                  " requested=",TimeToString(ND02_LastBasketFailRequested,TIME_DATE|TIME_MINUTES),
+                  " actual=",TimeToString(ND02_LastBasketFailActual,TIME_DATE|TIME_MINUTES));
+            gLastBasketFailNews=gNext;
+            gLastBasketFailPrint=TimeCurrent();
+         }
          return; // retry until decision window expires
       }
 
