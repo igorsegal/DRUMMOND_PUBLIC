@@ -1,0 +1,85 @@
+name: BUILD NEWS26
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/news26_build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Checkout pinned calendar bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/joor0x/forex-factory-agent-feed.git ffbridge
+          cd ffbridge
+          git checkout b8b8dd24c9f281975398b5c58c3e931110b96909
+          pip install -r requirements.txt
+
+      - name: Scrape 2026 Jan-Sep high-impact calendar in UTC
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ffbridge
+          python -m ff_calendar_toolkit.cli scrape \
+            --months 2026-01 2026-02 2026-03 2026-04 2026-05 2026-06 2026-07 2026-08 2026-09 \
+            --timezone UTC \
+            --currencies AUD CAD CHF EUR GBP JPY NZD USD \
+            --impacts red \
+            --format csv \
+            --output-dir news26
+
+      - name: Build MT4 NEWS26.csv
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,glob,pathlib,datetime
+          root=pathlib.Path('ffbridge/news26/monthly')
+          files=sorted(root.glob('2026-*.csv'))
+          print('monthly files', [p.name for p in files])
+          assert len(files)>=9, len(files)
+          out=[]; seen=set()
+          for p in files:
+              with p.open(encoding='utf-8-sig',newline='') as f:
+                  for r in csv.DictReader(f):
+                      if (r.get('impact_level') or '').strip().lower()!='high': continue
+                      cur=(r.get('currency') or '').strip().upper()
+                      if cur not in {'AUD','CAD','CHF','EUR','GBP','JPY','NZD','USD'}: continue
+                      dt=(r.get('datetime_utc') or '').strip()
+                      if not dt: continue
+                      x=datetime.datetime.fromisoformat(dt.replace('Z','+00:00')).astimezone(datetime.timezone.utc)
+                      if x.year!=2026: continue
+                      if x.date()>datetime.date(2026,9,26): continue
+                      name=(r.get('event') or '').strip().replace(';',',')
+                      k=(x.isoformat(),cur,name)
+                      if k in seen: continue
+                      seen.add(k);out.append((x,cur,name))
+          out.sort()
+          dst=pathlib.Path('NEWS26.csv')
+          with dst.open('w',encoding='utf-8',newline='') as f:
+              w=csv.writer(f,delimiter=';',lineterminator='\n')
+              w.writerow(['UTC_TIME','CURRENCY','IMPACT','EVENT'])
+              for x,cur,name in out:
+                  w.writerow([x.strftime('%Y-%m-%dT%H:%M:%SZ'),cur,'HIGH',name])
+          print('NEWS26 events',len(out),'first',out[0] if out else None,'last',out[-1] if out else None)
+          assert len(out)>300, len(out)
+          PY
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEWS26
+          path: NEWS26.csv
+          if-no-files-found: error
