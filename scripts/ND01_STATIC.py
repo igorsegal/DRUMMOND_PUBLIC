@@ -2,9 +2,9 @@
 from pathlib import Path
 import re, sys
 
-root=Path("NEWS_DISLOCATION_TRADER_01")
-ea=(root/"NEWS_DISLOCATION_TRADER_01.mq4").read_text(encoding="utf-8")
-core=(root/"ND01_CurrencyStrengthCore.mqh").read_text(encoding="utf-8")
+root=Path("ND01")
+ea=(root/"ND01.mq4").read_text(encoding="utf-8")
+core=(root/"ND01.mqh").read_text(encoding="utf-8")
 readme=(root/"README_RU.txt").read_text(encoding="utf-8")
 
 pairs=[
@@ -38,7 +38,7 @@ ok("real account blocked by default", "InpAllowRealAccount      = false" in ea)
 ok("demo gate checks IsDemo", "!IsDemo() && !InpAllowRealAccount" in ea)
 ok("one position per symbol", "ND01_HasOpenPosition" in ea)
 ok("timer-driven multi-symbol architecture", "EventSetTimer(10)" in ea and "void OnTimer()" in ea)
-ok("common-files news input", "FILE_COMMON" in ea and "NEWS_LIVE.csv" in ea)
+ok("common-files news input", "FILE_COMMON" in ea and "NEWS.csv" in ea)
 ok("high-impact only", 'if(impact!="HIGH")' in ea)
 ok("cluster de-duplication key", "NDT01_"+"" in ea and "GlobalVariableCheck(key)" in ea)
 ok("30/90 research hold warning", "InpHoldMinutes!=30 && InpHoldMinutes!=90" in ea)
