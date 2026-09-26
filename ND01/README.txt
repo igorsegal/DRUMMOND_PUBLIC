@@ -1,4 +1,4 @@
-NEWS DISLOCATION TRADER 01
+ND01
 ===========================
 
 Назначение
@@ -42,14 +42,14 @@ NEWS DISLOCATION TRADER 01
 
 Установка
 ---------
-Скопировать папку NEWS_DISLOCATION_TRADER_01 в:
-MQL4\Experts\NEWS_DISLOCATION_TRADER_01\
+Скопировать папку ND01 в:
+MQL4\Experts\ND01\
 
 Файлы:
-NEWS_DISLOCATION_TRADER_01.mq4
-ND01_CurrencyStrengthCore.mqh
+ND01.mq4
+ND01.mqh
 
-Скомпилировать NEWS_DISLOCATION_TRADER_01.mq4 в MetaEditor.
+Скомпилировать ND01.mq4 в MetaEditor.
 
 EA ставится ТОЛЬКО НА ОДИН график.
 Он сам работает со всеми 28 символами.
@@ -86,7 +86,7 @@ InpAllowRealAccount=false
 Новостной файл
 --------------
 EA читает:
-Common\Files\NEWS_LIVE.csv
+Common\Files\NEWS.csv
 
 Формат:
 UTC_TIME;CURRENCY;IMPACT;EVENT
@@ -100,7 +100,7 @@ Actual / Forecast / Previous ему не нужны.
 
 Журнал
 ------
-Common\Files\NEWS_DISLOCATION_TRADER_01.csv
+Common\Files\ND01.csv
 
 В журнал попадают:
 - время события;
