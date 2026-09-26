@@ -30,17 +30,36 @@ jobs:
       - name: Syntax
         run: python -m py_compile scripts/ND03_PREP.py scripts/drummond_replay01.py
 
-      - name: Download frozen NEWS2026 artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Download pinned Forex Factory bridge
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .news
-          gh run download 36243573530 --repo igorsegal/DRUMMOND_PUBLIC --name NEWS2026 --dir .news
-          test -s .news/NEWS2026.csv
-          cp .news/NEWS2026.csv .news/NEWS26.csv
-          echo "NEWS rows=$(( $(wc -l < .news/NEWS26.csv) - 1 ))"
+          mkdir -p .news/raw
+          BASE='https://raw.githubusercontent.com/joor0x/forex-factory-agent-feed/e30c2828efbb4c2d88c2ece23799bbf8872314fd/news/monthly'
+          for M in 2026-06 2026-07 2026-08 2026-09; do
+            curl -L --fail --retry 5 --retry-delay 2 "$BASE/$M.csv" -o ".news/raw/$M.csv"
+          done
+          python - <<'PY'
+          import csv,glob,pathlib
+          rows=[]
+          for fn in sorted(glob.glob('.news/raw/*.csv')):
+              with open(fn,encoding='utf-8-sig',newline='') as f:
+                  rd=csv.DictReader(f)
+                  for r in rd:
+                      if (r.get('impact_level') or '').strip().lower()!='high': continue
+                      dt=(r.get('datetime_utc') or '').strip()
+                      cur=(r.get('currency') or '').strip().upper()
+                      ev=(r.get('event') or '').strip()
+                      if not dt or not cur or not ev: continue
+                      rows.append((dt,cur,'HIGH',ev))
+          rows=sorted(set(rows))
+          p=pathlib.Path('.news/NEWS26.csv')
+          with p.open('w',encoding='utf-8',newline='') as f:
+              w=csv.writer(f,delimiter=';')
+              w.writerow(['UTC_TIME','CURRENCY','IMPACT','EVENT'])
+              w.writerows(rows)
+          print('BRIDGE_HIGH_ROWS',len(rows),'USD_ROWS',sum(r[1]=='USD' for r in rows))
+          PY
 
       - name: Download canonical manifest
         env:
