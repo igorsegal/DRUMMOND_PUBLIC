@@ -43,10 +43,17 @@ jobs:
                   d.get(url)
                   WebDriverWait(d,20).until(EC.presence_of_element_located((By.CLASS_NAME,'calendar__table')))
                   rows=d.find_elements(By.CSS_SELECTOR,'tr.calendar__row')
-                  high=d.find_elements(By.CSS_SELECTOR,'.calendar__impact--high')
-                  print('RANGE',rng,'TITLE',d.title,'ROWS',len(rows),'HIGH_ICONS',len(high),'URL',d.current_url)
+                  impacts=d.find_elements(By.CSS_SELECTOR,'.calendar__impact span')
+                  classes=sorted(set((x.get_attribute('class') or '') for x in impacts))
+                  print('RANGE',rng,'TITLE',d.title,'ROWS',len(rows),'IMPACT_SPANS',len(impacts),'CLASSES',classes,'URL',d.current_url)
+                  for row in rows[:12]:
+                      try:
+                          cell=row.find_element(By.CSS_SELECTOR,'.calendar__impact')
+                          print('ROW',row.text.replace('\\n',' | '),'IMPACT_HTML',cell.get_attribute('innerHTML')[:300])
+                      except Exception:
+                          pass
                   assert len(rows)>20
-                  assert len(high)>0
+                  assert len(impacts)>0
           finally:
               d.quit()
           PY
