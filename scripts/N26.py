@@ -12,6 +12,7 @@ Key change vs the failed month scraper:
 """
 import argparse,csv,re,time
 from datetime import date,datetime,timedelta,timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from selenium import webdriver
@@ -20,6 +21,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 CURS={"AUD","CAD","CHF","EUR","GBP","JPY","NZD","USD"}
+SOURCE_TZ=ZoneInfo("America/Chicago")
 MON={"jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
      "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12}
 MON_REV={v:k for k,v in MON.items()}
@@ -148,13 +150,16 @@ def scrape_range(start:date, end:date):
                 if cur not in CURS or not high or not event:
                     continue
 
-                dt=datetime.combine(current_date,current_time,tzinfo=timezone.utc)
+                local_dt=datetime.combine(current_date,current_time,tzinfo=SOURCE_TZ)
+                utc_dt=local_dt.astimezone(timezone.utc)
                 out.append({
-                    "UTC_TIME":dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "UTC_TIME":utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "CURRENCY":cur,
                     "IMPACT":"HIGH",
                     "EVENT":event,
                     "SOURCE_EVENT_ID":row.get_attribute("data-event-id") or "",
+                    "SOURCE_TIME_LOCAL":local_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "SOURCE_TIMEZONE":"America/Chicago",
                     "SOURCE_RANGE":f"{start.isoformat()}..{end.isoformat()}",
                 })
 
@@ -223,11 +228,33 @@ def main():
         dt=datetime.fromisoformat(r["UTC_TIME"].replace("Z","+00:00"))
         assert dt.year==a.year and dt.month==m
         assert r["CURRENCY"] in CURS and r["IMPACT"]=="HIGH"
+        assert r["SOURCE_TIMEZONE"]=="America/Chicago"
+
+    # Forex Factory was observed on GitHub-hosted runners in Central time.
+    # Fail closed if a standard 08:30 ET US release is not shown as 07:30 CT;
+    # this prevents silently writing a shifted UTC calendar if FF defaults change.
+    anchors={"Non-Farm Employment Change","Unemployment Claims",
+             "CPI m/m","Core CPI m/m","PPI m/m","Core PPI m/m"}
+    checked=0
+    for r in rows:
+        if r["CURRENCY"]=="USD" and r["EVENT"] in anchors:
+            hhmm=r["SOURCE_TIME_LOCAL"][11:16]
+            if hhmm!="07:30":
+                raise SystemExit(
+                    f"SOURCE_TZ_CONTRACT_FAIL {r['EVENT']} local={hhmm} "
+                    "expected 07:30 America/Chicago"
+                )
+            checked+=1
+    if checked==0:
+        print("SOURCE_TZ_ANCHOR_WARN no standard USD 08:30 ET anchor in month")
+    else:
+        print("SOURCE_TZ_CONTRACT_PASS anchors",checked)
 
     a.out.parent.mkdir(parents=True,exist_ok=True)
     with a.out.open("w",encoding="utf-8",newline="") as f:
         w=csv.DictWriter(f,fieldnames=[
-            "UTC_TIME","CURRENCY","IMPACT","EVENT","SOURCE_EVENT_ID","SOURCE_RANGE"
+            "UTC_TIME","CURRENCY","IMPACT","EVENT","SOURCE_EVENT_ID",
+            "SOURCE_TIME_LOCAL","SOURCE_TIMEZONE","SOURCE_RANGE"
         ],delimiter=";")
         w.writeheader();w.writerows(rows)
 
