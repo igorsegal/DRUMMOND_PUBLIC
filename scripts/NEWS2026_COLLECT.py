@@ -7,7 +7,7 @@ requests from one IP/session. Selenium/Chrome timezone is forced to UTC before
 loading the page. Only scheduled High-impact events for the eight FX
 currencies are exported; Actual/Forecast/Previous are deliberately ignored.
 """
-import argparse,csv,re,time
+import argparse,csv,re,time,calendar
 from datetime import datetime,timezone
 from pathlib import Path
 
@@ -38,7 +38,9 @@ def parse_clock(text):
     return datetime.strptime(x,"%I:%M%p").time()
 
 def scrape(month_name, year, out):
-    url=f"https://www.forexfactory.com/calendar?month={month_name.lower()}.{year}"
+    mon=MONTHS[month_name[:3].lower()]
+    last=calendar.monthrange(year,mon)[1]
+    url=f"https://www.forexfactory.com/calendar?range={month_name.lower()}1.{year}-{month_name.lower()}{last}.{year}"
     last=None
     for attempt in range(1,4):
         opt=webdriver.ChromeOptions()
