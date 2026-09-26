@@ -52,8 +52,15 @@ jobs:
                   d.get(url)
                   WebDriverWait(d,25).until(EC.presence_of_element_located((By.CLASS_NAME,'calendar__table')))
                   source_tz=d.execute_script("return Intl.DateTimeFormat().resolvedOptions().timeZone")
+                  height=d.execute_script('return document.body.scrollHeight')
+                  for y in range(0,int(height)+1200,700):
+                      d.execute_script(f'window.scrollTo(0,{y})')
+                      time.sleep(0.08)
+                  d.execute_script('window.scrollTo(0,0)')
+                  time.sleep(0.5)
                   trs=d.find_elements(By.CSS_SELECTOR,'tr.calendar__row')
-                  print(m,'timezone',source_tz,'rows',len(trs))
+                  red_count=len(d.find_elements(By.CSS_SELECTOR,'.icon--ff-impact-red'))
+                  print(m,'timezone',source_tz,'rows',len(trs),'red',red_count)
                   assert len(trs)>100,(m,len(trs))
                   current_date=None; current_time=None
                   z=pytz.timezone(source_tz)
@@ -100,7 +107,7 @@ jobs:
               for utc,cur,name in rows_out:
                   w.writerow([utc.strftime('%Y-%m-%dT%H:%M:%SZ'),cur,'HIGH',name.replace(';',',')])
           print('EVENTS',len(rows_out),'FIRST',rows_out[0] if rows_out else None,'LAST',rows_out[-1] if rows_out else None)
-          assert len(rows_out)>300,len(rows_out)
+          assert len(rows_out)>400,len(rows_out)
           PY
       - uses: actions/upload-artifact@v4
         with:
