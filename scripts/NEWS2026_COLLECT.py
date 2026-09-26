@@ -69,10 +69,16 @@ def scrape(month_name, year, out):
 
             for row in rows:
                 cls=row.get_attribute("class") or ""
+
+                # Month/range pages contain explicit day-breaker rows. Use them
+                # as the primary date source; some event rows omit calendar__date.
                 if "day-breaker" in cls:
+                    txt=row.text.strip()
+                    if txt:
+                        current_date=parse_date(txt,year)
+                    current_time=None
                     continue
 
-                # Date is present only on the first event row of a day.
                 ds=row.find_elements(By.CSS_SELECTOR,".calendar__date")
                 if ds:
                     txt=ds[0].text.strip()
@@ -91,15 +97,17 @@ def scrape(month_name, year, out):
                     continue
 
                 cs=row.find_elements(By.CSS_SELECTOR,".calendar__currency")
-                ims=row.find_elements(By.CSS_SELECTOR,".calendar__impact span[title]")
+                ims=row.find_elements(By.CSS_SELECTOR,".calendar__impact span")
                 es=row.find_elements(By.CSS_SELECTOR,".calendar__event-title")
                 if not cs or not ims or not es:
                     continue
 
                 cur=cs[0].text.strip().upper()
-                impact=(ims[0].get_attribute("title") or "").strip()
+                impact_title=(ims[0].get_attribute("title") or "").strip()
+                impact_class=(ims[0].get_attribute("class") or "").lower()
+                is_high=("high impact expected" in impact_title.lower() or "ff-impact-red" in impact_class)
                 event=es[0].text.strip()
-                if cur not in CURS or impact!="High Impact Expected" or not event:
+                if cur not in CURS or not is_high or not event:
                     continue
 
                 dt=datetime.combine(current_date,current_time,tzinfo=timezone.utc)
