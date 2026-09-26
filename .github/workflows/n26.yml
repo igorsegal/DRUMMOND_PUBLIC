@@ -1,0 +1,60 @@
+name: N26
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 2026 month (jan..sep)
+        required: true
+        default: jan
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install Selenium
+        run: pip install selenium==4.13.0
+
+      - name: Collect month
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python scripts/N26.py \
+            --year 2026 \
+            --month "${{ inputs.month }}" \
+            --through 2026-09-26 \
+            --out "out/N26_${{ inputs.month }}.csv"
+
+      - name: Contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,glob,datetime,collections
+          fn=glob.glob('out/N26_*.csv')[0]
+          rows=list(csv.DictReader(open(fn,encoding='utf-8-sig'),delimiter=';'))
+          assert rows
+          assert all(r['IMPACT']=='HIGH' for r in rows)
+          assert all(r['CURRENCY'] in {'AUD','CAD','CHF','EUR','GBP','JPY','NZD','USD'} for r in rows)
+          keys=[(r['UTC_TIME'],r['CURRENCY'],r['EVENT']) for r in rows]
+          assert len(keys)==len(set(keys))
+          print('N26 CONTRACT PASS')
+          print('ROWS',len(rows),'FIRST',rows[0]['UTC_TIME'],'LAST',rows[-1]['UTC_TIME'])
+          print('BY_CURRENCY',dict(sorted(collections.Counter(r['CURRENCY'] for r in rows).items())))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: n26-${{ inputs.month }}
+          path: out/N26_${{ inputs.month }}.csv
+          if-no-files-found: error
