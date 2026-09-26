@@ -27,6 +27,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: NEWS_DISLOCATION_TRADER_01
-          path: NEWS_DISLOCATION_TRADER_01/
+          name: ND01
+          path: ND01/
           if-no-files-found: error
