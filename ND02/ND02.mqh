@@ -327,14 +327,23 @@ bool ND02_SymbolZ30(const string sym,
    z30=0.0;
    datetime aligned=ND02_AlignUpM5(eventServer);
 
-   if(iBars(sym,PERIOD_M5)<ND02_VOL_BARS+20)
+   int bars=iBars(sym,PERIOD_M5);
+   if(bars<ND02_VOL_BARS+20)
       return false;
 
-   int s0=iBarShift(sym,PERIOD_M5,aligned,true);
-   int s30=iBarShift(sym,PERIOD_M5,aligned+1800,true);
+   int s0=iBarShift(sym,PERIOD_M5,aligned,false);
+   int s30=iBarShift(sym,PERIOD_M5,aligned+1800,false);
    if(s0<0 || s30<0)
       return false;
-   if(s0+ND02_VOL_BARS+1>=iBars(sym,PERIOD_M5))
+
+   datetime t0=iTime(sym,PERIOD_M5,s0);
+   datetime t30=iTime(sym,PERIOD_M5,s30);
+   if(MathAbs((double)(t0-aligned))>300.0)
+      return false;
+   if(MathAbs((double)(t30-(aligned+1800)))>300.0)
+      return false;
+
+   if(s0+ND02_VOL_BARS+1>=bars)
       return false;
 
    double o0=iOpen(sym,PERIOD_M5,s0);
