@@ -57,6 +57,28 @@ def scrape(month_name, year, out):
             d.set_page_load_timeout(45)
             d.get(url)
             WebDriverWait(d,30).until(EC.presence_of_element_located((By.CLASS_NAME,"calendar__table")))
+
+            # Forex Factory lazy-loads much of a month while scrolling.
+            # Without this, only the first visible days are parsed.
+            previous=-1
+            stable=0
+            for step in range(180):
+                pos=d.execute_script("return window.pageYOffset")
+                height=d.execute_script("return document.body.scrollHeight")
+                d.execute_script("window.scrollTo(0, Math.min(arguments[0]+900, arguments[1]))",pos,height)
+                time.sleep(0.35)
+                newpos=d.execute_script("return window.pageYOffset")
+                newheight=d.execute_script("return document.body.scrollHeight")
+                if newpos==pos and newheight==height:
+                    stable+=1
+                    if stable>=4:
+                        break
+                else:
+                    stable=0
+                previous=newpos
+            d.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(1.5)
+
             rows=d.find_elements(By.CSS_SELECTOR,"tr.calendar__row")
             body=d.find_element(By.TAG_NAME,"body").text
             tz_lines=[x.strip() for x in body.splitlines() if "Calendar Time Zone:" in x]
