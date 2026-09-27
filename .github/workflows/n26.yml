@@ -33,7 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          MONTH="${{ inputs.month || 'jan' }}"
+          MONTH="${{ inputs.month || 'feb' }}"
           echo "N26 month=$MONTH"
           python scripts/N26.py \
             --year 2026 \
@@ -61,6 +61,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: n26-${{ inputs.month || 'jan' }}
+          name: n26-${{ inputs.month || 'feb' }}
           path: out/N26_*.csv
           if-no-files-found: error
