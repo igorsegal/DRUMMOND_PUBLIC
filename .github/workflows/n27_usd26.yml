@@ -1,0 +1,74 @@
+name: N27 USD26
+
+on:
+  push:
+    paths:
+      - '.github/workflows/n27_usd26.yml'
+      - 'scripts/N27_USD26.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download verified N26 month artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p incoming
+          cat > /tmp/artifacts.txt <<'EOF'
+          jan 10932774527
+          feb 10933761395
+          mar 10914512159
+          apr 10915152221
+          may 10923496658
+          jun 10924237130
+          jul 10923854740
+          aug 10927050161
+          sep 10930816403
+          EOF
+          while read -r mon aid; do
+            mkdir -p "incoming/$mon"
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/$aid/zip" > "/tmp/$mon.zip"
+            unzip -q "/tmp/$mon.zip" -d "incoming/$mon"
+            echo "DOWNLOADED $mon artifact=$aid"
+            find "incoming/$mon" -maxdepth 2 -type f -print
+          done < /tmp/artifacts.txt
+
+      - name: Build USD26
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python scripts/N27_USD26.py incoming out/USD26_2026_JAN_SEP.csv
+
+      - name: Contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,hashlib
+          fn='out/USD26_2026_JAN_SEP.csv'
+          rows=list(csv.DictReader(open(fn,encoding='utf-8-sig'),delimiter=';'))
+          assert len(rows)==201, len(rows)
+          assert all(r['CURRENCY']=='USD' and r['IMPACT']=='HIGH' for r in rows)
+          keys=[(r['UTC_TIME'],r['CURRENCY'],r['EVENT']) for r in rows]
+          assert len(keys)==len(set(keys))
+          print('N27 CONTRACT PASS')
+          print('USD26_ROWS',len(rows))
+          print('SHA256',hashlib.sha256(open(fn,'rb').read()).hexdigest())
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usd26-2026-jan-sep
+          path: out/USD26_2026_JAN_SEP.csv
+          if-no-files-found: error
