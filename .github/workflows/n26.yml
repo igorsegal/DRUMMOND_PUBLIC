@@ -33,7 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          MONTH="${{ inputs.month || 'jun' }}"
+          MONTH="${{ inputs.month || 'jul' }}"
           echo "N26 month=$MONTH"
           python scripts/N26.py \
             --year 2026 \
