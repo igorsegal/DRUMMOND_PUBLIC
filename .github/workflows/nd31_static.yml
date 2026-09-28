@@ -1,0 +1,23 @@
+name: ND31 STATIC CHECK
+
+on:
+  push:
+    paths:
+      - 'ND31/**'
+      - 'scripts/ND31_STATIC.py'
+      - '.github/workflows/nd31_static.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: ND31 contract
+        run: python scripts/ND31_STATIC.py
