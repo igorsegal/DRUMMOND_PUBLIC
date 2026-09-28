@@ -1,0 +1,121 @@
+name: N29 XAUUSD REPLAY
+
+on:
+  push:
+    paths:
+      - '.github/workflows/n29_xau_replay.yml'
+      - 'scripts/N29_XAU_REPLAY.py'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Syntax
+        run: python -m py_compile scripts/N29_XAU_REPLAY.py scripts/drummond_replay01.py
+
+      - name: Download N28 verified external USD artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .n28
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/10940961689/zip" > /tmp/n28.zip
+          unzip -q /tmp/n28.zip -d .n28
+          test -s .n28/USD26.csv
+          cat .n28/ND03.txt
+
+      - name: Download canonical manifest
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: dataset03-drummond_canonical_8e9a1d784e3893d9
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .dataset
+          gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern DATASET_MANIFEST.csv
+
+      - name: Resolve XAUUSD M5
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,pathlib
+          with open('.dataset/DATASET_MANIFEST.csv',newline='',encoding='utf-8-sig') as f:
+              rows=[r for r in csv.DictReader(f) if r.get('symbol')=='XAUUSD' and r.get('tf')=='M5']
+          assert len(rows)==1, [(r.get('symbol'),r.get('tf')) for r in rows]
+          r=rows[0]
+          pathlib.Path('.dataset/xau_shard.txt').write_text(r['shard']+'\n')
+          pathlib.Path('.dataset/xau_rel.txt').write_text(r['relative_path'].replace('\\','/')+'\n')
+          pathlib.Path('.dataset/xau_sha.txt').write_text(r['sha256']+'\n')
+          print('XAU',r['symbol'],r['tf'],r['bar_count'],r['relative_path'],r['shard'])
+          PY
+
+      - name: Download XAUUSD shard
+        env:
+          GH_TOKEN: ${{ secrets.DRUMMOND_DATA_TOKEN }}
+          TAG: dataset03-drummond_canonical_8e9a1d784e3893d9
+        shell: bash
+        run: |
+          set -euo pipefail
+          S="$(cat .dataset/xau_shard.txt)"
+          gh release download "$TAG" --repo igorsegal/DRUMMOND_CLOUD --dir .dataset --pattern "$S"
+
+      - name: Extract and verify XAUUSD M5
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib,pathlib,zipfile
+          shard=pathlib.Path('.dataset/xau_shard.txt').read_text().strip()
+          rel=pathlib.Path('.dataset/xau_rel.txt').read_text().strip()
+          want=pathlib.Path('.dataset/xau_sha.txt').read_text().strip().lower()
+          out=pathlib.Path('.xau'); out.mkdir(exist_ok=True)
+          with zipfile.ZipFile(pathlib.Path('.dataset')/shard) as z:
+              assert rel in set(z.namelist()), rel
+              z.extract(rel,out)
+          p=out/rel
+          got=hashlib.sha256(p.read_bytes()).hexdigest()
+          assert got==want,(got,want)
+          pathlib.Path('.dataset/xau_path.txt').write_text(str(p))
+          print('XAU_VERIFY_PASS',p,got)
+          PY
+
+      - name: Replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p results/latest/n29
+          python scripts/N29_XAU_REPLAY.py             --xau "$(cat .dataset/xau_path.txt)"             --external .n28/USD26.csv             --out results/latest/n29
+          cat results/latest/n29/N29.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,pathlib,hashlib
+          p=pathlib.Path('results/latest/n29/N29_XAUUSD_REPLAY.csv')
+          rows=list(csv.DictReader(p.open(encoding='utf-8-sig'),delimiter=';'))
+          assert rows
+          assert all(r['UTC_TIME'].startswith('2026-') for r in rows)
+          assert all(r['SIGNAL'] in {'Y','N'} for r in rows)
+          print('N29 GATE PASS rows',len(rows),'signals',sum(r['SIGNAL']=='Y' for r in rows))
+          print('N29_SHA256',hashlib.sha256(p.read_bytes()).hexdigest())
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: n29-xauusd-replay
+          path: results/latest/n29/
+          if-no-files-found: error
