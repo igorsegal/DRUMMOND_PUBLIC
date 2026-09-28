@@ -1,0 +1,30 @@
+name: ND31 NEWS SNAPSHOT
+
+on:
+  push:
+    paths:
+      - 'scripts/ND31_NEWS.py'
+      - '.github/workflows/nd31_news.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install Selenium
+        run: pip install selenium==4.13.0
+      - name: Build live news snapshot
+        run: PYTHONPATH=scripts python scripts/ND31_NEWS.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nd31-news-2026-09-28-to-2026-10-04
+          path: out/ND31_NEWS.csv
+          if-no-files-found: error
